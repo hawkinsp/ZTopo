@@ -3,23 +3,24 @@
 
 #include <QThread>
 #include <QImage>
+#include "map.h"
 
-class MapScene;
+class MapWidget;
 
 class TileIOThread : public QThread {
   Q_OBJECT;
 
 public:
-  TileIOThread(MapScene *s, QObject *parent = 0);
+  TileIOThread(MapWidget *s, QObject *parent = 0);
 
 protected:
   void run();
 
 private:
-  MapScene *scene;
+  MapWidget *view;
 
 signals:
-  void tileLoaded(int x, int y, int level, QString filename, QImage img);
+  void tileLoaded(Tile tile, QString filename, QImage img);
 };
 
 #endif

@@ -3,17 +3,17 @@ TEMPLATE = app
 TARGET = 
 DEPENDPATH += .
 INCLUDEPATH += .
-CONFIG += qt thread
+CONFIG += qt thread 
+# release
 
 # Input
-HEADERS += consts.h mainwindow.h map.h mapprojection.h mapscene.h mapview.h \
-	tileiothread.h
+HEADERS += consts.h mainwindow.h map.h mapprojection.h \
+	tileiothread.h mapwidget.h
 SOURCES += main.cpp \
            mainwindow.cpp \
            map.cpp \
            mapprojection.cpp \
-           mapscene.cpp \
-           mapview.cpp \
+	   mapwidget.cpp \
 	   tileiothread.cpp
 QT += opengl
-# LIBS += -lgdal
+LIBS += -L/opt/local/lib -lproj -framework GDAL -lgdal

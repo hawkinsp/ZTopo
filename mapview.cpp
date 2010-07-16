@@ -17,8 +17,8 @@
 MapView::MapView(MapScene *s, QWidget *parent)
   : QGraphicsView(s, parent), scene(s)
 {
-  QGLWidget *viewport = new QGLWidget(QGLFormat(QGL::SampleBuffers));
-  // QWidget *viewport = new QWidget();
+  //   QGLWidget *viewport = new QGLWidget(QGLFormat(QGL::SampleBuffers));
+   QWidget *viewport = new QWidget();
   setViewport(viewport);
   //  setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
   setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -55,9 +55,15 @@ bool MapView::gestureEvent(QGestureEvent *ev)
 
 void MapView::mouseMoveEvent(QMouseEvent *ev)
 {
-  QPoint pos = mapToScene(ev->pos()).toPoint();
-  emit(positionUpdated(pos));
   QGraphicsView::mouseMoveEvent(ev);
+  lastMousePos = ev->pos();
+  positionChanged();
+}
+
+void MapView::positionChanged()
+{
+  QPoint pos = mapToScene(lastMousePos).toPoint();
+  emit(positionUpdated(pos));
 }
 
 void MapView::pinchGestureEvent(QPinchGesture *g)
@@ -67,7 +73,9 @@ void MapView::pinchGestureEvent(QPinchGesture *g)
   switch (g->state()) {
   case Qt::GestureStarted:
     currentScaleStep = g->scaleFactor();
+    scene->setScalingMode(false);
     break;
+
   case Qt::GestureUpdated:
     if (g->changeFlags() & QPinchGesture::ScaleFactorChanged) {
       currentScaleStep = g->scaleFactor();
@@ -77,6 +85,7 @@ void MapView::pinchGestureEvent(QPinchGesture *g)
   case Qt::GestureFinished:
     currentScale = std::max(epsilon, std::min((float)16.0, oldScale));
     currentScaleStep = 1.0;
+    scene->setScalingMode(true);
     break;
     
   case Qt::GestureCanceled:
@@ -103,8 +112,8 @@ void MapView::resizeEvent(QResizeEvent *ev)
 
 void MapView::scrollContentsBy(int dx, int dy)
 {
-  panOrResizeScene();
   QGraphicsView::scrollContentsBy(dx, dy);
+  panOrResizeScene();
 }
 
 void MapView::panOrResizeScene()
@@ -112,6 +121,11 @@ void MapView::panOrResizeScene()
   QPointF topLeft(mapToScene(rect().topLeft()));
   QPointF bottomRight(mapToScene(rect().bottomRight()));
   scene->updateBounds(QRectF(topLeft, bottomRight).toRect(), level);
+
+  //  std::cout << "scrollcontents" << topLeft.x() << " " << topLeft.y() << " " << bottomRight.x() << " " <<
+  //    bottomRight.y() << std::endl;
+
+  positionChanged();
 }
 
 void MapView::zoomScene()

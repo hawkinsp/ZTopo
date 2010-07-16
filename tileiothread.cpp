@@ -1,9 +1,10 @@
 #include <QImage>
-#include "mapscene.h"
+#include "map.h"
+#include "mapwidget.h"
 #include "tileiothread.h"
 
-TileIOThread::TileIOThread(MapScene *s, QObject *parent)
-  : QThread(parent), scene(s)
+TileIOThread::TileIOThread(MapWidget *v, QObject *parent)
+  : QThread(parent), view(v)
 {
 
 }
@@ -11,18 +12,17 @@ TileIOThread::TileIOThread(MapScene *s, QObject *parent)
 void TileIOThread::run()
 {
   forever {
-    scene->tileQueueMutex.lock();
-    while (scene->tileQueue.isEmpty()) {
-      scene->tileQueueCond.wait(&scene->tileQueueMutex);
+    view->tileQueueMutex.lock();
+    while (view->tileQueue.isEmpty()) {
+      view->tileQueueCond.wait(&view->tileQueueMutex);
     }
-    QPair<TileKey, QString> pair = scene->tileQueue.dequeue();
-    scene->tileQueueMutex.unlock();
-    TileKey key = pair.first;
+    QPair<Tile, QString> pair = view->tileQueue.dequeue();
+    view->tileQueueMutex.unlock();
+    Tile key = pair.first;
     QString filename = pair.second;
     QImage img;
     if (img.load(filename)) {
-      img.setColor(0, qRgba(255, 255, 255, 255));
-      emit(tileLoaded(key.x, key.y, key.level, filename, img));
+      emit(tileLoaded(key, filename, img));
     }
     
   }

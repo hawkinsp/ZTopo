@@ -14,23 +14,29 @@ MapProjection::MapProjection()
   mapScale = 24000;
 
   float pixelSize = mapScale * metersPerInch / (float)mapResolution;
-  mapPixelSize = QPointF(pixelSize, -pixelSize);
-  std::cout << "pixel size" << pixelSize << std::endl;
+  mapPixelSize = QSizeF(pixelSize, -pixelSize);
+  // std::cout << "pixel size" << pixelSize << std::endl;
 }
 
-QPoint MapProjection::mapSize()
+QSize MapProjection::mapSize()
 {
-  return projToMap(projExtent).toPoint();
+  QPoint p = projToMap(projExtent).toPoint();
+  return QSize(p.x(), p.y());
 }
 
 QPointF MapProjection::mapToProj(QPointF m)
 {
-  return QPointF(m.x() * mapPixelSize.x() + projOrigin.x(),
-                 m.y() * mapPixelSize.y() + projOrigin.y());
+  return QPointF(m.x() * mapPixelSize.width() + projOrigin.x(),
+                 m.y() * mapPixelSize.height() + projOrigin.y());
 }
 
 QPointF MapProjection::projToMap(QPointF p)
 {
-  return QPointF((p.x() - projOrigin.x()) / mapPixelSize.x(),
-                 (p.y() - projOrigin.y()) / mapPixelSize.y());
+  return QPointF((p.x() - projOrigin.x()) / mapPixelSize.width(),
+                 (p.y() - projOrigin.y()) / mapPixelSize.height());
+}
+
+QRectF MapProjection::projToMap(QRectF p)
+{
+  return QRectF(projToMap(p.topLeft()), projToMap(p.bottomRight()));
 }

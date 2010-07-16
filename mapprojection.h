@@ -2,6 +2,8 @@
 #define MAPPROJECTION_H 1
 
 #include <QPointF>
+#include <QRectF>
+#include <QSize>
 //#include "ogr_spatialref.h"
 
 class MapProjection
@@ -14,11 +16,12 @@ class MapProjection
 
   // Convert a point from projection space to map space
   QPointF projToMap(QPointF p);
+  QRectF projToMap(QRectF p);
 
-  QPoint mapSize();
+  QSize mapSize();
 
   // Size of a map pixel in meters
-  float pixelSize() { return mapPixelSize.x(); }
+  QSizeF pixelSize() { return mapPixelSize; }
 
 
  private:
@@ -28,7 +31,7 @@ class MapProjection
   int mapResolution; // Resolution of the map in pixels per inch
   int mapScale;      // Scale of the map (1:mapScale)
 
-  QPointF mapPixelSize; // Size of a map pixel in projection space
+  QSizeF mapPixelSize; // Size of a map pixel in projection space
 
   //  OGRSpatialReference projSpace;
 

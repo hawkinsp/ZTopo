@@ -7,14 +7,10 @@
 #include "tileiothread.h"
 #include <iostream>
 
-uint qHash(const TileKey& k)
-{
-  return qHash(k.x) ^ qHash(k.y) ^ qHash(k.level);
-}
-
 
 MapScene::MapScene(Map *m, QObject *parent)
-  : QGraphicsScene(parent), map(m), emptyPixmap(m->emptyTile())
+  : QGraphicsScene(parent), map(m),
+    visibleArea(0, 0, 0, 0), zoomLevel(0), smoothScaling(true)
 {
   setSceneRect(0, 0, m->requestedSize().x(), m->requestedSize().y());
   ioThread = new TileIOThread(this, this);
@@ -26,77 +22,132 @@ MapScene::MapScene(Map *m, QObject *parent)
   gridPen.setColor(QColor(qRgb(0, 0, 0xFF)));
 }
 
-void MapScene::tileLoaded(int x, int y, int level, QString filename, QImage img)
+void MapScene::setScalingMode(bool smooth)
 {
-  TileKey key(x, y, level);
-  if (tileMap.contains(key)) {
-    QGraphicsPixmapItem *item = tileMap[key];
-    QPixmap p = QPixmap::fromImage(img);
-    QPixmapCache::insert(filename, p);
-    item->setPixmap(p);
-    item->setVisible(true);
-  }
-}
-
-void MapScene::updateTiles(QSet<TileKey> newTiles)
-{
-  foreach (TileKey key, newTiles) {
-    if (!tileMap.contains(key)) {
-      QString filename = map->tilePath(QPoint(key.x, key.y), key.level);
-      //      std::cout << "adding tile " << key.x << " " << key.y << " " << key.level <<
-      //        " " << filename.toStdString() << std::endl;
-      QPixmap p = emptyPixmap;
-      bool visible = true;
-      if (!QPixmapCache::find(filename, &p)) {
-        tileQueueMutex.lock();
-        tileQueue.enqueue(QPair<TileKey, QString>(key, filename));
-        tileQueueCond.wakeOne();
-        tileQueueMutex.unlock();
-        visible = false;
-      }
-      QGraphicsPixmapItem *item = addPixmap(p);
-      int logTileSize = map->logTileSize(key.level);
-      int scale = 1 << (map->maxLevel() - key.level);
-      item->setTransformationMode(Qt::SmoothTransformation);
-      item->setZValue(key.level);
-      item->setPos(key.x << logTileSize, key.y << logTileSize);
-      item->scale(scale, scale);
-      item->setVisible(visible);
-      tileMap[key] = item;
-    }
-  }
-
+  Qt::TransformationMode mode = 
+    smooth ? Qt::SmoothTransformation : Qt::FastTransformation;
+  smoothScaling = smooth;
   QMutableMapIterator<TileKey, QGraphicsPixmapItem *> i(tileMap);
   while (i.hasNext()) {
     i.next();
+    QGraphicsPixmapItem *item = i.value();
+    if (item) {
+      item->setTransformationMode(mode);
+    }
+  }  
+}
 
-    if (!newTiles.contains(i.key())) {
-      delete i.value();
+void MapScene::makeTile(TileKey key, QPixmap p)
+{
+  QGraphicsPixmapItem *item = addPixmap(p);
+
+  item->setShapeMode(QGraphicsPixmapItem::BoundingRectShape);
+
+  Qt::TransformationMode mode = smoothScaling ? Qt::SmoothTransformation : Qt::FastTransformation;
+  item->setTransformationMode(mode);
+
+  item->setZValue(key.level);
+
+  int logTileSize = map->logTileSize(key.level);
+  item->setPos(key.x << logTileSize, key.y << logTileSize);
+
+  int scale = 1 << (map->maxLevel() - key.level);
+  item->scale(scale, scale);
+
+  tileMap[key] = item;
+}
+
+void MapScene::tileLoaded(int x, int y, int level, QString filename, QImage img)
+{
+  TileKey key(x, y, level);
+  QPixmap p = QPixmap::fromImage(img);
+  std::cout << "has alpha " << (p.hasAlpha() ? "true" : "false") << std::endl;
+  QPixmapCache::insert(filename, p);
+
+  // Check to see that the tile should still be displayed; it may have already been pruned
+  if (tileMap.contains(key)) {
+    makeTile(key, p);
+    pruneStaleTiles();
+  }
+}
+
+bool MapScene::shouldPrune(TileKey key) 
+{
+  if (abs(key.level - zoomLevel) > 1) return true;
+  if (!visibleArea.intersects(map->tileToMapRect(key.x, key.y, key.level))) return true;
+  return false;
+}
+
+void MapScene::pruneStaleTiles()
+{
+  QMutableSetIterator<TileKey> i(staleTiles);
+  while (i.hasNext()) {
+    TileKey key = i.next();
+
+    if (shouldPrune(key)) {
       i.remove();
+      QGraphicsPixmapItem *item = tileMap[key];
+      if (item) delete item;
+      tileMap.remove(key);
     }
   }
 }
 
 
-void MapScene::updateBounds(QRect bounds, int maxLevel)
+void MapScene::updateBounds(QRect newVisibleArea, int newLevel)
 {
-  QSet<TileKey> newTiles;
-  for (int level = maxLevel; level >= 0; level--) {
-    int tileSize = map->tileSize(level);
-    int minTileX = std::max(0, bounds.left() / tileSize - 1);
-    int maxTileX = std::min(1<<level, bounds.right() / tileSize + 1);
-    int minTileY = std::max(0, bounds.top() / tileSize - 1);
-    int maxTileY = std::min(1<<level, bounds.bottom() / tileSize + 1);
-  
-    for (int tileY = minTileY; tileY <= maxTileY; tileY++) {
-      for (int tileX = minTileX; tileX <= maxTileX; tileX++) {
-        newTiles.insert(TileKey(tileX, tileY, level));
+  int oldLevel = zoomLevel;
+  QRect visibleTiles = map->mapRectToTileRect(visibleArea, zoomLevel);
+  QRect newVisibleTiles = map->mapRectToTileRect(newVisibleArea, newLevel);
+
+  // Old tiles still visible
+  /*  std::cout << "bounds: " << bounds.x() << " " << bounds.y() << " " <<
+    bounds.width() << " " << bounds.height() << std::endl;
+  std::cout << "old: " << oldLevel << " " << visibleTiles.x() << " " << visibleTiles.y() << " " <<
+    visibleTiles.width() << " " << visibleTiles.height() << std::endl;
+  std::cout << "new: " << newLevel << " " << newVisibleTiles.x() << " " << newVisibleTiles.y() << " " <<
+    newVisibleTiles.width() << " " << newVisibleTiles.height() << std::endl;
+  */
+
+  // Remove or mark stale invisible old tiles
+  for (int x = visibleTiles.left(); x <= visibleTiles.right(); x++) {
+    for (int y = visibleTiles.top(); y <= visibleTiles.bottom(); y++) {
+      TileKey key(x, y, oldLevel);
+
+      if (oldLevel != newLevel || !newVisibleTiles.contains(x, y)) {
+        staleTiles.insert(key);
       }
     }
   }
-  updateTiles(newTiles);
 
-  drawGrid(bounds);
+  zoomLevel = newLevel;
+  visibleArea = newVisibleArea;
+
+  for (int x = newVisibleTiles.left(); x <= newVisibleTiles.right(); x++) {
+    for (int y = newVisibleTiles.top(); y <= newVisibleTiles.bottom(); y++) {
+      TileKey key(x, y, newLevel);
+      staleTiles.remove(key);
+      if (!tileMap.contains(key)) {
+        QString filename = map->tilePath(QPoint(key.x, key.y), key.level);
+        QPixmap p;
+        if (QPixmapCache::find(filename, &p)) {
+          // The pixmap is in the cache; display it immediately
+          makeTile(key, p);
+        } else {
+          // Queue the tile for reading
+          tileQueueMutex.lock();
+          tileQueue.enqueue(QPair<TileKey, QString>(key, filename));
+          tileQueueCond.wakeOne();
+          tileQueueMutex.unlock();
+          tileMap[key] = NULL;
+        }
+      }
+    }
+  }
+  //  std::cout << "map tiles" << tileMap.size() << " stale tiles: " << staleTiles.size() << std::endl;
+  //  drawGrid(bounds);
+
+  pruneStaleTiles();
 }
 
 void MapScene::drawGrid(QRect bounds)

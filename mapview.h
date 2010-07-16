@@ -24,14 +24,19 @@ protected:
 private:
   MapScene *scene;
 
+  void positionChanged();
   void panOrResizeScene();
   void zoomScene();
   bool gestureEvent(QGestureEvent *ev);
   void pinchGestureEvent(QPinchGesture *g);
+
   int maxLevel;
   int level;
+
   float currentScale;
   float currentScaleStep;
+
+  QPoint lastMousePos;
 
 signals:
   void positionUpdated(QPoint pos);

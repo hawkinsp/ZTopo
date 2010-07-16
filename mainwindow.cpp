@@ -5,8 +5,9 @@
 #include <QStatusBar>
 #include <QStringBuilder>
 #include "mainwindow.h"
-#include "mapview.h"
-#include "mapscene.h"
+//#include "mapview.h"
+//#include "mapscene.h"
+#include "mapwidget.h"
 #include "map.h"
 #include "mapprojection.h"
 #include "consts.h"
@@ -46,14 +47,15 @@ MainWindow::MainWindow(QWidget *parent)
   // Create the main view
   proj = new MapProjection();
   map = new Map(proj);
-  scene = new MapScene(map);
-  view = new MapView(scene);
-  view->centerOn(389105.0, 366050.0);
-  view->update();
+  view = new MapWidget(map);
+  //  scene = new MapScene(map);
+  //  view = new MapView(scene);
+  view->centerOn(QPoint(389105, 366050));
+  //  view->update();
   setCentralWidget(view);
   connect(view, SIGNAL(positionUpdated(QPoint)), this, SLOT(updatePosition(QPoint)));
   connect(view, SIGNAL(scaleChanged(float)), this, SLOT(scaleChanged(float)));
-  updatePosition(view->mapToScene(view->rect().center()).toPoint());
+  // updatePosition(view->mapToScene(view->rect().center()).toPoint());
   scaleChanged(1.0);
 
   createActions();
@@ -72,8 +74,8 @@ void MainWindow::createActions()
   printAction = new QAction(tr("&Print..."), this);
   showGridAction = new QAction(tr("Show &Grid"), this);
   showGridAction->setCheckable(true);
-  connect(showGridAction, SIGNAL(toggled(bool)),
-          view, SLOT(setGridDisplayed(bool)));
+  //  connect(showGridAction, SIGNAL(toggled(bool)),
+  //          view, SLOT(setGridDisplayed(bool)));
 }
 
 void MainWindow::createMenus()
@@ -91,14 +93,15 @@ void MainWindow::createMenus()
 
 void MainWindow::updatePosition(QPoint mPos)
 {
-  QPointF pPos = proj->mapToProj(QPointF(mPos));
+  QPointF pPos(mPos);
+  //  QPointF pPos = proj->mapToProj(QPointF(mPos));
   posLabel->setText(QString::number(pPos.x()) % ", " % QString::number(pPos.y()));
 }
 
 void MainWindow::scaleChanged(float scaleFactor)
 {
   float screenMetersPerDot = (metersPerInch / (float)logicalDpiX());
-  float scale = (proj->pixelSize() / screenMetersPerDot) / scaleFactor; 
+  float scale = (proj->pixelSize().width() / screenMetersPerDot) / scaleFactor; 
   scaleLabel->setText(
     QString("1:" % QString::number((int)scale)).rightJustified(11, ' ')
   );

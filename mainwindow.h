@@ -7,8 +7,7 @@ class QLabel;
 class QComboBox;
 class Map;
 class MapProjection;
-class MapScene;
-class MapView;
+class MapWidget;
 
 class MainWindow : public QMainWindow
 {
@@ -25,8 +24,7 @@ public slots:
 private:
   Map *map;
   MapProjection *proj;
-  MapScene *scene;
-  MapView *view;
+  MapWidget *view;
 
   // Status bar
   QLabel *posLabel;       // Current position

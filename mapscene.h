@@ -12,24 +12,6 @@
 
 class TileIOThread;
 
-class TileKey {
-public:
-  TileKey(int vx, int vy, int vlevel) : x(vx), y(vy), level(vlevel) { } 
-  int x;
-  int y;
-  int level;
-
-  bool operator== (const TileKey& other) const {
-    return x == other.x && y == other.y && level == other.level; 
-  }
-  bool operator<  (const TileKey& other) const {
-    return (x < other.x) ||
-      (x == other.x && y < other.y) ||
-      (x == other.x && y == other.y && level < other.level);    
-  }
-};
-
-uint qHash(const TileKey& k);
 
 typedef QPair<QGraphicsLineItem *, QGraphicsLineItem *> GridLinePair;
 typedef QPair<int, int> IntPair;
@@ -41,6 +23,7 @@ public:
 
   // Notify the scene that the bounds of the view have changed
   void updateBounds(QRect bounds, int maxLevel);
+  void setScalingMode(bool smooth);
 
   int maxLevel() { return map->maxLevel(); }
 
@@ -53,16 +36,31 @@ public slots:
 
 private:
   Map *map;
+
+  // All currently loaded tiles.
+  // Tile keys are present but have value NULL if they are queued to be loaded from disk.
   QMap<TileKey, QGraphicsPixmapItem *> tileMap;
-  QPixmap emptyPixmap;
+
+  // Visible tiles that do not belong to the current zoom level; as soon as we load the appropriate tiles
+  // from the current zoom level we will delete these.
+  QSet<TileKey> staleTiles;
+
+  // Currently visible area of the map
+  QRect visibleArea;
+  int zoomLevel;
+
   TileIOThread *ioThread;
+
+  bool smoothScaling;
 
   QPen gridPen;
   QRect gridBounds;
   QMap<QPair<int, int>, GridLinePair> gridSegmentMap;
 
+  void makeTile(TileKey key, QPixmap p);
   void drawGrid(QRect bounds);
-  void updateTiles(QSet<TileKey> newTiles);
+  void pruneStaleTiles();
+  bool shouldPrune(TileKey key);
 };
 
 #endif
