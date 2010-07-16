@@ -20,6 +20,7 @@ public:
 public slots:
   void updatePosition(QPoint pos);
   void scaleChanged(float scale);
+  void printTriggered(bool checked);
 
 private:
   Map *map;

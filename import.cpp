@@ -185,7 +185,8 @@ int main(int argc, char **argv)
   QImage drg(filename.filePath());
   QDir dir;
 
-  for (int level = maxLevel; level >= 0; level--, scale /= 2.0) {
+  //  for (int level = maxLevel; level >= 0; level--, scale /= 2.0) {
+  int level = maxLevel;
     QSizeF rasterSizeF = QSizeF(ds->GetRasterXSize() * scale.width(),
                                ds->GetRasterYSize() * scale.height());
     QSize rasterSize = rasterSizeF.toSize();
@@ -252,6 +253,6 @@ int main(int argc, char **argv)
       }
     }
 
-  }
+    //  }
   return 0;
 }

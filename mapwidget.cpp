@@ -13,34 +13,54 @@
 #include <iostream>
 #include <cstdio>
 
+static const int numWorkerThreads = 2;
 MapWidget::MapWidget(Map *m, QWidget *parent)
   : QAbstractScrollArea(parent), map(m)
 {
-  ioThread = new TileIOThread(this, this);
-  connect(ioThread, SIGNAL(tileLoaded(Tile, QString, QImage)),
-          this, SLOT(tileLoaded(Tile, QString, QImage)));
-  ioThread->start();
+  bytesRead = 0;
+  for (int i = 0; i < numWorkerThreads; i++) {
+    TileIOThread *ioThread = new TileIOThread(this, this);
+    ioThreads << ioThread;
+    connect(ioThread, SIGNAL(tileLoaded(Tile, QString, QImage)),
+            this, SLOT(tileLoaded(Tile, QString, QImage)));
+    ioThread->start();
+  }
 
   //  setViewport(new QWidget());
-  //  setViewport(new QGLWidget());
+  setViewport(new QGLWidget());
   //  setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   //  setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-
-  QSize size = map->requestedSize();
-  horizontalScrollBar()->setRange(0, size.width());
-  verticalScrollBar()->setRange(0, size.height());
-
 
   setMouseTracking(true);
   smoothScaling = true;
   grabGesture(Qt::PinchGesture);
   scaleFactor = 1.0;
   scaleStep = 1.0;
+
+  minScale = float(map->baseTileSize()) / float(map->tileSize(0));
+  maxScale = 16.0;
   zoomChanged();
 
   currentLayer = 0;
 }
 
+void MapWidget::updateScrollBars()
+{
+  QSize size = map->requestedSize();
+  QRect r = visibleArea();
+  //  int w = r.width() / 2;
+  //  int h = r.height() / 2;
+  horizontalScrollBar()->setRange(0, size.width());
+  verticalScrollBar()->setRange(0, size.height());
+
+
+  QScrollBar *hScroll = horizontalScrollBar();
+  QScrollBar *vScroll = verticalScrollBar();
+  hScroll->setSingleStep(r.width() / 20);
+  hScroll->setPageStep(r.width());
+  vScroll->setSingleStep(r.height() / 20);
+  vScroll->setPageStep(r.height());
+}
 
 void MapWidget::zoomChanged()
 {
@@ -50,25 +70,20 @@ void MapWidget::zoomChanged()
   bumpedTileSize = int(tileSize * scaleFactor * scaleStep);
   bumpedScale = float(bumpedTileSize) / float(tileSize);
 
-  QRect r = visibleArea();
-  QScrollBar *hScroll = horizontalScrollBar();
-  QScrollBar *vScroll = verticalScrollBar();
-  hScroll->setSingleStep(r.width() / 20);
-  hScroll->setPageStep(r.width());
-  vScroll->setSingleStep(r.height() / 20);
-  vScroll->setPageStep(r.height());
+  updateScrollBars();
 
   currentLayer = map->bestLayerAtLevel(level);
 
+  emit(scaleChanged(scaleFactor * scaleStep));
   tilesChanged();
 }
 
 void MapWidget::tileLoaded(Tile key, QString filename, QImage img)
 {
-
-  img.setColor(map->layer(key.layer).transparentColor, qRgba(255, 255, 255, 255));
   QPixmap p = QPixmap::fromImage(img);
   QPixmapCache::insert(filename, p);
+
+  //  printf("%lld bytes read\n", bytesRead);
 
   // Check to see that the tile should still be displayed; it may have already been
   // pruned
@@ -128,7 +143,7 @@ void MapWidget::pinchGestureEvent(QPinchGesture *g)
     break;
 
   case Qt::GestureFinished:
-    scaleFactor = std::max(epsilon, std::min((float)16.0, oldScale));
+    scaleFactor = std::max(minScale, std::min(maxScale, oldScale));
     scaleStep = 1.0;
     smoothScaling = true;
     break;
@@ -140,6 +155,9 @@ void MapWidget::pinchGestureEvent(QPinchGesture *g)
   default: abort();
   }
 
+  if (scaleFactor * scaleStep < minScale) scaleStep = minScale / scaleFactor;
+  else if (scaleFactor * scaleStep > maxScale) scaleStep = maxScale / scaleFactor;
+
   QPoint screenCenter(center());
   QPoint pointBeforeScale = viewportToMap(g->startCenterPoint().toPoint());
   zoomChanged();
@@ -149,6 +167,8 @@ void MapWidget::pinchGestureEvent(QPinchGesture *g)
   repaint();
 }
 
+// Find the tile we requested, or identify a section of an ancestor tile that
+// we can use until the correct tile is loaded.
 void MapWidget::findTile(Tile key, QPixmap &p, QRect &r)
 {
   for (int level = key.level; level >= 0; level--) {
@@ -206,6 +226,7 @@ void MapWidget::paintEvent(QPaintEvent *ev)
 void MapWidget::resizeEvent(QResizeEvent *ev)
 {
   QAbstractScrollArea::resizeEvent(ev);
+  updateScrollBars();
   tilesChanged();
 }
 
@@ -219,24 +240,38 @@ void MapWidget::scrollContentsBy(int dx, int dy)
 
 void MapWidget::tilesChanged()
 {
-  for (int level = zoomLevel() - 1; level <= zoomLevel(); level++) {
-    QRect newVisibleTiles = map->mapRectToTileRect(visibleArea(), level);
+  QRect vis(visibleArea());
+
+  QMutableMapIterator<Tile, QPixmap> i(tileMap);
+  while (i.hasNext()) {
+    i.next();
+    Tile t = i.key();
+    QRect r = map->tileToMapRect(t);
+    if (!r.intersects(vis)) {
+      i.remove();
+    }
+  }
+
+  for (int level = std::max(0, zoomLevel() - 1); level <= zoomLevel(); level++) {
+    QRect newVisibleTiles = map->mapRectToTileRect(vis, level);
 
     for (int x = newVisibleTiles.left(); x <= newVisibleTiles.right(); x++) {
       for (int y = newVisibleTiles.top(); y <= newVisibleTiles.bottom(); y++) {
-        Tile key(x, y, level, currentLayer);
+        Tile key(x, y, level, map->bestLayerAtLevel(level));
         if (!tileMap.contains(key)) {
           QString filename = map->tilePath(key);
-          //          std::cout << filename.toStdString() << std::endl;
           QPixmap p;
           if (!QPixmapCache::find(filename, &p)) {
             // Queue the tile for reading
+
+            int size = 0;
             tileQueueMutex.lock();
             tileQueue.enqueue(QPair<Tile, QString>(key, filename));
+            size = tileQueue.size();
             tileQueueCond.wakeOne();
             tileQueueMutex.unlock();
-            tileMap[key] = QPixmap();
           }
+          tileMap[key] = p;
         }
       }
     }
@@ -251,7 +286,7 @@ int MapWidget::zoomLevel()
   float scale = std::max(std::min(scaleFactor * scaleStep, (float)1.0),
                          epsilon);
   float r = maxLevel() + log2f(scale);
-  return (int)ceilf(r);
+  return std::max(0, int(ceilf(r)));
 }
 
 QPoint MapWidget::center()
@@ -275,6 +310,7 @@ QRect MapWidget::viewToMapRect(QRect r)
   return QRect(r.x() / scale(), r.y() / scale(), r.width() / scale(), r.height() / scale());
 }
 
+// Visible area in map coordinates
 QRect MapWidget::visibleArea()
 {
   int mw = int(width() / scale());

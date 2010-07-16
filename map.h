@@ -75,19 +75,24 @@ public:
   QRect mapRectToTileRect(QRect r, int level);
 
   // Convert a tile to a map area
-  QRect tileToMapRect(int x, int y, int level);
+  QRect tileToMapRect(Tile t);
 
-  // Map the rectangle r in level fromLevel to the smallest rectangle in toLevel that
-  // covers the same area
+  // Map the tile rectangle r in level fromLevel to the smallest rectangle in 
+  // toLevel that covers the same area
   QRect rectAtLevel(QRect r, int fromLevel, int toLevel);
 
   MapProjection *projection() { return proj; }
+
+  // Best level for viewing at a given scale factor
+  int zoomLevel(float scale);
 
   // Best layer to display for a zoom level
   int bestLayerAtLevel(int level);
 
   const Layer &layer(int id) { return layers[id]; }
+  bool layerByName(QString name, int &layer);
 
+  Tile quadKeyToTile(int layer, QString quadKey);
 private:
   QVector<Layer> layers;
 
@@ -107,7 +112,6 @@ private:
   int vMaxLevel;     // Number of levels of the tile pyramid
 
   QString tileToQuadKey(Tile t);
-  Tile quadKeyToTile(int layer, QString quadKey);
 };
 
 #endif

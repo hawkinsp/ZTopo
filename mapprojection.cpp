@@ -6,10 +6,17 @@
 
 MapProjection::MapProjection()
 {
-  //  projSpace.importFromProj4("+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +ellps=GRS80 +datum=NAD83 +units=m +no_defs");
- 
-  projOrigin = QPointF(-460000.0, 460000.0);
-  projExtent = QPointF(640000.0, -640000.0);
+  projSpace.importFromProj4("+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +ellps=GRS80 +datum=NAD83 +units=m +no_defs");
+  nad27GeographicSpace.SetWellKnownGeogCS("NAD27");
+  nad83GeographicSpace.SetWellKnownGeogCS("NAD83");
+  toNad83 = OGRCreateCoordinateTransformation(&projSpace, &nad83GeographicSpace);
+  if (toNad83 == NULL) abort();
+
+  projOrigin = QPointF(-525000.0, 545000.0);
+  projExtent = QPointF(675000.0, -655000.0);
+
+  //  projOrigin = QPointF(-460000.0, 460000.0);
+  //  projExtent = QPointF(640000.0, -640000.0);
   mapResolution = 400;
   mapScale = 24000;
 
@@ -21,6 +28,7 @@ MapProjection::MapProjection()
 QSize MapProjection::mapSize()
 {
   QPoint p = projToMap(projExtent).toPoint();
+  //  std::cout << "map size" << p.x() << " " << p.y() << std::endl;
   return QSize(p.x(), p.y());
 }
 
@@ -39,4 +47,13 @@ QPointF MapProjection::projToMap(QPointF p)
 QRectF MapProjection::projToMap(QRectF p)
 {
   return QRectF(projToMap(p.topLeft()), projToMap(p.bottomRight()));
+}
+
+
+QPointF MapProjection::toGeographicNAD83(QPointF p)
+{
+  double x = p.x();
+  double y = p.y();
+  toNad83->Transform(1, &x, &y);
+  return QPointF(x, y);
 }

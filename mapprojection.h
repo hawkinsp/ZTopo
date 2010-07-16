@@ -4,7 +4,7 @@
 #include <QPointF>
 #include <QRectF>
 #include <QSize>
-//#include "ogr_spatialref.h"
+#include "ogr_spatialref.h"
 
 class MapProjection
 {
@@ -23,6 +23,8 @@ class MapProjection
   // Size of a map pixel in meters
   QSizeF pixelSize() { return mapPixelSize; }
 
+  // Convert a point in projection space to NAD83 Geographic
+  QPointF toGeographicNAD83(QPointF proj);
 
  private:
   QPointF projOrigin; // Origin of the map space in projection space
@@ -33,7 +35,10 @@ class MapProjection
 
   QSizeF mapPixelSize; // Size of a map pixel in projection space
 
-  //  OGRSpatialReference projSpace;
+  OGRSpatialReference projSpace;
+  OGRSpatialReference nad27GeographicSpace;
+  OGRSpatialReference nad83GeographicSpace;
+  OGRCoordinateTransformation *toNad83;
 
 };
 

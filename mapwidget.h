@@ -41,6 +41,7 @@ public:
 
 
   // Public for thread class
+  qint64 bytesRead;
   QMutex tileQueueMutex;
   QWaitCondition tileQueueCond;
   QQueue<QPair<Tile, QString> > tileQueue;
@@ -61,11 +62,13 @@ protected:
 
 
 private:
-  TileIOThread *ioThread;
+  QVector<TileIOThread *> ioThreads;
 
   Map *map;
 
   bool smoothScaling;
+
+  float minScale, maxScale;
 
   float scaleFactor;
   float scaleStep;
@@ -88,6 +91,7 @@ private:
 
   void positionChanged();
   void tilesChanged();
+  void updateScrollBars();
   void zoomChanged();
 
   void findTile(Tile key, QPixmap &p, QRect &r);

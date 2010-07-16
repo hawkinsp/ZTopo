@@ -25,21 +25,32 @@ Map::Map(MapProjection *p)
   }
   logBaseTileSz = 8;
   baseTileSz = 1 << logBaseTileSz;
-  vMaxLevel = logSize - logBaseTileSz + 1;
-  layers.append(Layer("24k", 13, 0));
-  layers.append(Layer("100k", 10, 1));
+  vMaxLevel = logSize - logBaseTileSz;
+  layers.append(Layer("24k", 12, 0));
+  layers.append(Layer("100k", 9, 1));
   //  layers.append(Layer("250k", 9, 1));
   layers.append(Layer("base", 8, 2));
 }
 
 int Map::bestLayerAtLevel(int level)
 {
-  if (level > 10) return 0;
+  if (level > 9) return 0;
   return 1;
   //  if (level > 8) return 1;
   //  return 2;
 }
 
+
+bool Map::layerByName(QString name, int &layer)
+{
+  for (int i = 0; i < layers.size(); i++) {
+    if (layers[i].name == name) {
+      layer = i;
+      return true;
+    }
+  }
+  return false;
+}
 
 QPoint Map::mapToTile(QPoint m, int level)
 {
@@ -87,7 +98,7 @@ QString Map::tileToQuadKey(Tile tile)
 
 Tile Map::quadKeyToTile(int layer, QString quad)
 {
-  int x = 0, y = 0, level = quad.length() - 1;
+  int x = 0, y = 0, level = quad.length();
   for (int i = level; i > 0; i--) {
     int mask = 1 << (i - 1);
     QChar c = quad[level - i];
@@ -130,11 +141,11 @@ QRect Map::mapRectToTileRect(QRect r, int level)
   return QRect(minTileX, minTileY, maxTileX - minTileX, maxTileY - minTileY);
 }
 
-QRect Map::tileToMapRect(int x, int y, int level)
+QRect Map::tileToMapRect(Tile t)
 {
-  int logSize = logTileSize(level);
+  int logSize = logTileSize(t.level);
   int size = 1 << logSize;
-  return QRect(x << logSize, y << logSize, size, size);
+  return QRect(t.x << logSize, t.y << logSize, size, size);
 }
 
 QRect Map::rectAtLevel(QRect r, int fromLevel, int toLevel)
@@ -159,4 +170,12 @@ QRect Map::rectAtLevel(QRect r, int fromLevel, int toLevel)
     return QRect(r.x() << shift, r.y() << shift, r.width() << shift, 
                  r.height() << shift);
   }
+}
+
+int Map::zoomLevel(float scaleFactor)
+{
+  float scale = std::max(std::min(scaleFactor, (float)1.0),
+                         epsilon);
+  float r = maxLevel() + log2f(scale);
+  return std::max(0, int(ceilf(r)));
 }

@@ -2,6 +2,8 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPrintDialog>
+#include <QPrinter>
 #include <QStatusBar>
 #include <QStringBuilder>
 #include "mainwindow.h"
@@ -11,6 +13,7 @@
 #include "map.h"
 #include "mapprojection.h"
 #include "consts.h"
+#include <ogr_spatialref.h>
 
 #include <iostream>
 
@@ -69,9 +72,22 @@ MainWindow::~MainWindow()
   delete proj;
 }
 
+
+void MainWindow::printTriggered(bool checked)
+{
+  QPrinter printer(QPrinter::HighResolution);
+  QPrintDialog *dialog = new QPrintDialog(&printer, this);
+  dialog->setWindowTitle(tr("Print Document"));
+  if (dialog->exec() != QDialog::Accepted)
+    return;
+
+}
+
 void MainWindow::createActions()
 {
   printAction = new QAction(tr("&Print..."), this);
+  connect(printAction, SIGNAL(triggered(bool)), this, SLOT(printTriggered(bool)));
+
   showGridAction = new QAction(tr("Show &Grid"), this);
   showGridAction->setCheckable(true);
   //  connect(showGridAction, SIGNAL(toggled(bool)),
@@ -93,8 +109,8 @@ void MainWindow::createMenus()
 
 void MainWindow::updatePosition(QPoint mPos)
 {
-  QPointF pPos(mPos);
-  //  QPointF pPos = proj->mapToProj(QPointF(mPos));
+  //QPointF pPos(mPos);
+  QPointF pPos = proj->toGeographicNAD83(proj->mapToProj(QPointF(mPos)));
   posLabel->setText(QString::number(pPos.x()) % ", " % QString::number(pPos.y()));
 }
 
