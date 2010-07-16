@@ -12,6 +12,7 @@
 #include "mapwidget.h"
 #include "map.h"
 #include "mapprojection.h"
+#include "maprenderer.h"
 #include "consts.h"
 #include <ogr_spatialref.h>
 
@@ -50,7 +51,8 @@ MainWindow::MainWindow(QWidget *parent)
   // Create the main view
   proj = new MapProjection();
   map = new Map(proj);
-  view = new MapWidget(map);
+  renderer = new MapRenderer(map);
+  view = new MapWidget(map, renderer);
   //  scene = new MapScene(map);
   //  view = new MapView(scene);
   view->centerOn(QPoint(389105, 366050));

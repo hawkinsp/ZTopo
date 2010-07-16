@@ -8,23 +8,15 @@
 #include <QGLWidget>
 #include "consts.h"
 #include "map.h"
+#include "maprenderer.h"
 #include "mapwidget.h"
-#include "tileiothread.h"
 #include <iostream>
 #include <cstdio>
 
-static const int numWorkerThreads = 2;
-MapWidget::MapWidget(Map *m, QWidget *parent)
-  : QAbstractScrollArea(parent), map(m)
+MapWidget::MapWidget(Map *m, MapRenderer *r, QWidget *parent)
+  : QAbstractScrollArea(parent), map(m), renderer(r)
 {
-  bytesRead = 0;
-  for (int i = 0; i < numWorkerThreads; i++) {
-    TileIOThread *ioThread = new TileIOThread(this, this);
-    ioThreads << ioThread;
-    connect(ioThread, SIGNAL(tileLoaded(Tile, QString, QImage)),
-            this, SLOT(tileLoaded(Tile, QString, QImage)));
-    ioThread->start();
-  }
+  connect(r, SIGNAL(tileUpdated(Tile)), this, SLOT(tileUpdated(Tile)));
 
   //  setViewport(new QWidget());
   setViewport(new QGLWidget());
@@ -37,7 +29,7 @@ MapWidget::MapWidget(Map *m, QWidget *parent)
   scaleFactor = 1.0;
   scaleStep = 1.0;
 
-  minScale = float(map->baseTileSize()) / float(map->tileSize(0));
+  minScale = qreal(map->baseTileSize()) / qreal(map->tileSize(0));
   maxScale = 16.0;
   zoomChanged();
 
@@ -67,8 +59,7 @@ void MapWidget::zoomChanged()
   // Find the nearest integer scaled tile size and adjust the scale factor to fit
   int level = zoomLevel();
   int tileSize = map->tileSize(level);
-  bumpedTileSize = int(tileSize * scaleFactor * scaleStep);
-  bumpedScale = float(bumpedTileSize) / float(tileSize);
+  renderer->bumpScale(scaleFactor * scaleStep, bumpedScale, bumpedTileSize);
 
   updateScrollBars();
 
@@ -78,18 +69,8 @@ void MapWidget::zoomChanged()
   tilesChanged();
 }
 
-void MapWidget::tileLoaded(Tile key, QString filename, QImage img)
+void MapWidget::tileUpdated(Tile key)
 {
-  QPixmap p = QPixmap::fromImage(img);
-  QPixmapCache::insert(filename, p);
-
-  //  printf("%lld bytes read\n", bytesRead);
-
-  // Check to see that the tile should still be displayed; it may have already been
-  // pruned
-  if (tileMap.contains(key)) {
-    tileMap[key] = p;
-  }
   repaint();
 }
 
@@ -128,7 +109,7 @@ void MapWidget::positionChanged()
 
 void MapWidget::pinchGestureEvent(QPinchGesture *g)
 {
-  float oldScale = scaleFactor * scaleStep;
+  qreal oldScale = scaleFactor * scaleStep;
   
   switch (g->state()) {
   case Qt::GestureStarted:
@@ -167,60 +148,15 @@ void MapWidget::pinchGestureEvent(QPinchGesture *g)
   repaint();
 }
 
-// Find the tile we requested, or identify a section of an ancestor tile that
-// we can use until the correct tile is loaded.
-void MapWidget::findTile(Tile key, QPixmap &p, QRect &r)
-{
-  for (int level = key.level; level >= 0; level--) {
-    int deltaLevel = key.level - level;
-    Tile t(key.x >> deltaLevel, key.y >> deltaLevel, level, key.layer);
-
-    if (tileMap.contains(t) && !tileMap[t].isNull()) {
-      int logSubSize = map->logBaseTileSize() - deltaLevel;
-      int mask = (1 << deltaLevel) - 1;
-      int subX = (key.x & mask) << logSubSize;
-      int subY = (key.y & mask) << logSubSize;
-      int size = 1 << logSubSize;
-      p = tileMap[t];
-      r = QRect(subX, subY, size, size);
-      return;
-    }
-  }
-}
-
 void MapWidget::paintEvent(QPaintEvent *ev)
 {
-  QRect mr = visibleArea();
-
   QAbstractScrollArea::paintEvent(ev);
+  QRect mr = visibleArea();
   int level = zoomLevel();
   QRect visibleTiles = map->mapRectToTileRect(mr, level);
 
   QPainter p(viewport());
-  p.setRenderHint(QPainter::SmoothPixmapTransform, smoothScaling);
-  p.setCompositionMode(QPainter::CompositionMode_Source);
-  p.save();
-  
-  int mx = int(mr.x() * bumpedScale);
-  int my = int(mr.y() * bumpedScale);
-
-  for (int x = visibleTiles.left(); x <= visibleTiles.right(); x++) {
-    for (int y = visibleTiles.top(); y <= visibleTiles.bottom(); y++) {
-      Tile key(x, y, level, currentLayer);
-      QPixmap px;
-      QRect r;
-
-      findTile(key, px, r);
-
-      if (!px.isNull()) {
-        int vx = x * bumpedTileSize - mx;
-        int vy = y * bumpedTileSize - my;
-        p.drawPixmap(QRect(vx, vy, bumpedTileSize, bumpedTileSize), px, r);
-      }
-    }
-  }
-
-  p.restore();
+  renderer->render(p, currentLayer, mr, bumpedScale, smoothScaling);
 }
 
 void MapWidget::resizeEvent(QResizeEvent *ev)
@@ -242,51 +178,20 @@ void MapWidget::tilesChanged()
 {
   QRect vis(visibleArea());
 
-  QMutableMapIterator<Tile, QPixmap> i(tileMap);
-  while (i.hasNext()) {
-    i.next();
-    Tile t = i.key();
-    QRect r = map->tileToMapRect(t);
-    if (!r.intersects(vis)) {
-      i.remove();
-    }
-  }
+  renderer->pruneTiles(vis);
 
   for (int level = std::max(0, zoomLevel() - 1); level <= zoomLevel(); level++) {
-    QRect newVisibleTiles = map->mapRectToTileRect(vis, level);
-
-    for (int x = newVisibleTiles.left(); x <= newVisibleTiles.right(); x++) {
-      for (int y = newVisibleTiles.top(); y <= newVisibleTiles.bottom(); y++) {
-        Tile key(x, y, level, map->bestLayerAtLevel(level));
-        if (!tileMap.contains(key)) {
-          QString filename = map->tilePath(key);
-          QPixmap p;
-          if (!QPixmapCache::find(filename, &p)) {
-            // Queue the tile for reading
-
-            int size = 0;
-            tileQueueMutex.lock();
-            tileQueue.enqueue(QPair<Tile, QString>(key, filename));
-            size = tileQueue.size();
-            tileQueueCond.wakeOne();
-            tileQueueMutex.unlock();
-          }
-          tileMap[key] = p;
-        }
-      }
-    }
+    renderer->loadTiles(map->bestLayerAtLevel(level), vis, bumpedScale);
   }
   //  drawGrid(bounds);
-
-  //  pruneStaleTiles();
 }
 
 int MapWidget::zoomLevel()
 {
-  float scale = std::max(std::min(scaleFactor * scaleStep, (float)1.0),
-                         epsilon);
-  float r = maxLevel() + log2f(scale);
-  return std::max(0, int(ceilf(r)));
+  qreal scale = std::max(std::min(scaleFactor * scaleStep, qreal(1.0)),
+                         qreal(epsilon));
+  qreal r = maxLevel() + log2(scale);
+  return std::max(0, int(ceil(r)));
 }
 
 QPoint MapWidget::center()

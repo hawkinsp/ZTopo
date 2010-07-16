@@ -3,22 +3,19 @@
 
 #include <QAbstractScrollArea>
 #include <QMap>
-#include <QMutex>
 #include <QPair>
 #include <QPixmap>
-#include <QQueue>
-#include <QWaitCondition>
 
 #include "map.h"
 class QPaintEvent;
 class QGestureEvent;
 class QPinchGesture;
-class TileIOThread;
+class MapRenderer;
 
 class MapWidget : public QAbstractScrollArea {
   Q_OBJECT
 public:
-  MapWidget(Map *m, QWidget *parent = 0);
+  MapWidget(Map *m, MapRenderer *r, QWidget *parent = 0);
 
   // Top left of the view in map coordinates
   QPoint viewTopLeft();
@@ -39,15 +36,8 @@ public:
   // Visible area in map coordinates
   QRect visibleArea();
 
-
-  // Public for thread class
-  qint64 bytesRead;
-  QMutex tileQueueMutex;
-  QWaitCondition tileQueueCond;
-  QQueue<QPair<Tile, QString> > tileQueue;
-
 public slots:
-  void tileLoaded(Tile key, QString filename, QImage img);
+  void tileUpdated(Tile key);
 
 signals:
   void positionUpdated(QPoint pos);
@@ -62,17 +52,16 @@ protected:
 
 
 private:
-  QVector<TileIOThread *> ioThreads;
-
   Map *map;
+  MapRenderer *renderer;
 
   bool smoothScaling;
 
-  float minScale, maxScale;
+  qreal minScale, maxScale;
 
-  float scaleFactor;
-  float scaleStep;
-  float bumpedScale;
+  qreal scaleFactor;
+  qreal scaleStep;
+  qreal bumpedScale;
   int   bumpedTileSize;
   float scale() { return bumpedScale; }
 
@@ -80,10 +69,6 @@ private:
   QPoint lastMousePos;
 
   int currentLayer;
-
-  // All currently loaded tiles.
-  // Tiles are present but have value NULL if they are queued to be loaded from disk.
-  QMap<Tile, QPixmap> tileMap;
 
   bool gestureEvent(QGestureEvent *ev);
   void pinchGestureEvent(QPinchGesture *g);
@@ -93,8 +78,6 @@ private:
   void tilesChanged();
   void updateScrollBars();
   void zoomChanged();
-
-  void findTile(Tile key, QPixmap &p, QRect &r);
 
   int zoomLevel();
   int maxLevel() { return map->maxLevel(); }

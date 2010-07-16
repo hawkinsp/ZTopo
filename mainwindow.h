@@ -7,6 +7,7 @@ class QLabel;
 class QComboBox;
 class Map;
 class MapProjection;
+class MapRenderer;
 class MapWidget;
 
 class MainWindow : public QMainWindow
@@ -25,6 +26,7 @@ public slots:
 private:
   Map *map;
   MapProjection *proj;
+  MapRenderer *renderer;
   MapWidget *view;
 
   // Status bar
