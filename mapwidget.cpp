@@ -26,6 +26,7 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, QWidget *parent)
   panning = false;
 
   gridEnabled = false;
+  showRuler = true;
 
 
   connect(r, SIGNAL(tileUpdated(Tile)), this, SLOT(tileUpdated(Tile)));
@@ -99,9 +100,22 @@ bool MapWidget::gestureEvent(QGestureEvent *ev)
   }
 }
 
+void MapWidget::mousePressEvent(QMouseEvent *ev)
+{
+  QAbstractScrollArea::mousePressEvent(ev);
+  lastMousePos = ev->pos();
+}
+
 void MapWidget::mouseMoveEvent(QMouseEvent *ev)
 {
   QAbstractScrollArea::mouseMoveEvent(ev);
+
+  if (ev->buttons() & Qt::LeftButton) {
+    QPoint before = viewToMap(lastMousePos);
+    QPoint after = viewToMap(ev->pos());
+    QPoint delta = after - before;
+    centerOn(center() - delta);
+  }
   lastMousePos = ev->pos();
   positionChanged();
 }
@@ -183,10 +197,12 @@ void MapWidget::paintEvent(QPaintEvent *ev)
                                      gridInterval);
     }
   }
-  p.save();
-  p.translate(5, vr.height() - 30);
-  renderer->renderRuler(p, vr.width() / 3, currentScale());
-  p.restore();
+  if (showRuler) {
+    p.save();
+    p.translate(5, vr.height() - 30);
+    renderer->renderRuler(p, vr.width() / 3, currentScale());
+    p.restore();
+  }
 }
 
 void MapWidget::resizeEvent(QResizeEvent *ev)
@@ -204,17 +220,35 @@ void MapWidget::scrollContentsBy(int dx, int dy)
 }
 
 
+void MapWidget::centerOn(QPoint p)
+{
+  horizontalScrollBar()->setValue(p.x());
+  verticalScrollBar()->setValue(p.y());
+}
+
+void MapWidget::setScale(qreal scale)
+{  
+  if (scale < minScale)      { scaleFactor = minScale; scaleStep = 1.0; }
+  else if (scale < maxScale) { scaleFactor = scale;    scaleStep = 1.0; }
+  else if (scale > maxScale) { scaleFactor = maxScale; scaleStep = 1.0; }
+  // NaN scale -> no changed
+
+  zoomChanged();
+  repaint();
+}
+
+void MapWidget::setRulerVisible(bool v)
+{
+  showRuler = v;
+  repaint();
+}
+
 
 QPoint MapWidget::center()
 {
   return QPoint(horizontalScrollBar()->value(), verticalScrollBar()->value());
 }
 
-void MapWidget::centerOn(QPoint p)
-{
-  horizontalScrollBar()->setValue(p.x());
-  verticalScrollBar()->setValue(p.y());
-}
 
 QPoint MapWidget::viewToMap(QPoint p)
 {

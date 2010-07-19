@@ -18,14 +18,28 @@ class MapWidget : public QAbstractScrollArea {
 public:
   MapWidget(Map *m, MapRenderer *r, QWidget *parent = 0);
 
+
+  // Center on a point in map coordinates
+  void centerOn(QPoint p);
+
+  // Set the current scale factor
+  qreal currentScale() { return bumpedScale; }
+  void setScale(qreal scale);
+
+  // Show/hide ruler
+  void setRulerVisible(bool vis);
+
+  // Set grid projection
+  void showGrid(Datum d, bool utm, qreal interval);
+  void hideGrid();
+
+
   // Top left of the view in map coordinates
   QPoint viewTopLeft();
 
   // Center of the view in map coordinates
   QPoint center();
 
-  // Center on a point in map coordinates
-  void centerOn(QPoint p);
 
   // Convert view coordinates to map coordinates
   QPoint viewToMap(QPoint v);
@@ -37,10 +51,6 @@ public:
   // Layer choice
   void setLayer(int layer);
 
-  // Set grid projection
-  void showGrid(Datum d, bool utm, qreal interval);
-  void hideGrid();
-
 public slots:
   void tileUpdated(Tile key);
 
@@ -51,10 +61,10 @@ signals:
 protected:
   virtual void paintEvent(QPaintEvent *event);
   virtual bool event(QEvent *event);
+  virtual void mousePressEvent(QMouseEvent *event);
   virtual void mouseMoveEvent(QMouseEvent *event);
   virtual void resizeEvent(QResizeEvent *event);
   virtual void scrollContentsBy(int dx, int dy);
-
 
 private:
   Map *map;
@@ -69,7 +79,6 @@ private:
   qreal scaleFactor;
   qreal scaleStep;
   qreal bumpedScale;
-  qreal currentScale() { return bumpedScale; }
   int currentLayer(); // Current map layer
 
   // Last mouse position observed in a mouse move event
@@ -79,6 +88,7 @@ private:
   // Current layer; negative means choose automatically
   int selectedLayer;
 
+  bool showRuler; // Show scale ruler
 
   // Map grid
   bool gridEnabled;
