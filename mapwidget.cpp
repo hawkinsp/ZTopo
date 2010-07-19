@@ -16,24 +16,29 @@
 MapWidget::MapWidget(Map *m, MapRenderer *r, QWidget *parent)
   : QAbstractScrollArea(parent), map(m), renderer(r)
 {
-  connect(r, SIGNAL(tileUpdated(Tile)), this, SLOT(tileUpdated(Tile)));
-
-  //  setViewport(new QWidget());
-  setViewport(new QGLWidget());
-  //  setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-  //  setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-
-  setMouseTracking(true);
-  smoothScaling = true;
-  grabGesture(Qt::PinchGesture);
+  selectedLayer = -1;
   scaleFactor = 1.0;
   scaleStep = 1.0;
 
   minScale = qreal(map->baseTileSize()) / qreal(map->tileSize(0));
   maxScale = 16.0;
-  zoomChanged();
 
-  currentLayer = 0;
+  panning = false;
+
+  gridEnabled = false;
+
+
+  connect(r, SIGNAL(tileUpdated(Tile)), this, SLOT(tileUpdated(Tile)));
+
+  //  setViewport(new QWidget());
+  setViewport(new QGLWidget(QGLFormat(QGL::SampleBuffers)));
+  setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+  setMouseTracking(true);
+  smoothScaling = true;
+  grabGesture(Qt::PinchGesture);
+  zoomChanged();
 }
 
 void MapWidget::updateScrollBars()
@@ -57,19 +62,18 @@ void MapWidget::updateScrollBars()
 void MapWidget::zoomChanged()
 {
   // Find the nearest integer scaled tile size and adjust the scale factor to fit
-  int level = zoomLevel();
-  int tileSize = map->tileSize(level);
-  renderer->bumpScale(scaleFactor * scaleStep, bumpedScale, bumpedTileSize);
+  int level = map->zoomLevel(scaleFactor * scaleStep);
+  int layer = selectedLayer < 0 ? map->bestLayerAtLevel(level) : selectedLayer;
+  int bumpedTileSize;
+  renderer->bumpScale(layer, scaleFactor * scaleStep, bumpedScale, bumpedTileSize);
 
   updateScrollBars();
-
-  currentLayer = map->bestLayerAtLevel(level);
 
   emit(scaleChanged(scaleFactor * scaleStep));
   tilesChanged();
 }
 
-void MapWidget::tileUpdated(Tile key)
+void MapWidget::tileUpdated(Tile)
 {
   repaint();
 }
@@ -104,7 +108,7 @@ void MapWidget::mouseMoveEvent(QMouseEvent *ev)
 
 void MapWidget::positionChanged()
 {
-  emit(positionUpdated(viewportToMap(lastMousePos)));
+  emit(positionUpdated(viewToMap(lastMousePos)));
 }
 
 void MapWidget::pinchGestureEvent(QPinchGesture *g)
@@ -140,23 +144,49 @@ void MapWidget::pinchGestureEvent(QPinchGesture *g)
   else if (scaleFactor * scaleStep > maxScale) scaleStep = maxScale / scaleFactor;
 
   QPoint screenCenter(center());
-  QPoint pointBeforeScale = viewportToMap(g->startCenterPoint().toPoint());
+  QPoint pointBeforeScale = viewToMap(g->startCenterPoint().toPoint());
   zoomChanged();
-  QPoint pointAfterScale = viewportToMap(g->startCenterPoint().toPoint());
+  QPoint pointAfterScale = viewToMap(g->startCenterPoint().toPoint());
   centerOn(screenCenter + pointBeforeScale - pointAfterScale);
 
   repaint();
 }
 
+int MapWidget::currentLayer()
+{
+  int level = map->zoomLevel(currentScale());
+  int layer = selectedLayer < 0 ? map->bestLayerAtLevel(level) : selectedLayer;
+  return layer;
+}
+
+void MapWidget::tilesChanged()
+{
+  QRect vis(visibleArea());
+  renderer->pruneTiles(vis);
+  renderer->loadTiles(currentLayer(), vis, currentScale());
+}
+
 void MapWidget::paintEvent(QPaintEvent *ev)
 {
   QAbstractScrollArea::paintEvent(ev);
+  QRect vr = viewport()->rect();
   QRect mr = visibleArea();
-  int level = zoomLevel();
-  QRect visibleTiles = map->mapRectToTileRect(mr, level);
 
   QPainter p(viewport());
-  renderer->render(p, currentLayer, mr, bumpedScale, smoothScaling);
+  p.setRenderHint(QPainter::SmoothPixmapTransform, smoothScaling);
+  renderer->render(p, currentLayer(), mr, currentScale());
+  if (gridEnabled) {
+    if (gridUTM) {
+      renderer->renderUTMGrid(p, mr, currentScale(), gridDatum, gridInterval);
+    } else {
+      renderer->renderGeographicGrid(p, mr, currentScale(), gridDatum, 
+                                     gridInterval);
+    }
+  }
+  p.save();
+  p.translate(5, vr.height() - 30);
+  renderer->renderRuler(p, vr.width() / 3, currentScale());
+  p.restore();
 }
 
 void MapWidget::resizeEvent(QResizeEvent *ev)
@@ -174,25 +204,6 @@ void MapWidget::scrollContentsBy(int dx, int dy)
 }
 
 
-void MapWidget::tilesChanged()
-{
-  QRect vis(visibleArea());
-
-  renderer->pruneTiles(vis);
-
-  for (int level = std::max(0, zoomLevel() - 1); level <= zoomLevel(); level++) {
-    renderer->loadTiles(map->bestLayerAtLevel(level), vis, bumpedScale);
-  }
-  //  drawGrid(bounds);
-}
-
-int MapWidget::zoomLevel()
-{
-  qreal scale = std::max(std::min(scaleFactor * scaleStep, qreal(1.0)),
-                         qreal(epsilon));
-  qreal r = maxLevel() + log2(scale);
-  return std::max(0, int(ceil(r)));
-}
 
 QPoint MapWidget::center()
 {
@@ -207,19 +218,21 @@ void MapWidget::centerOn(QPoint p)
 
 QPoint MapWidget::viewToMap(QPoint p)
 {
-  return QPoint(p.x() / scale(), p.y() / scale());
+  return viewTopLeft() + QPoint(p.x() / currentScale(), p.y() / currentScale());
 }
 
 QRect MapWidget::viewToMapRect(QRect r)
 {
-  return QRect(r.x() / scale(), r.y() / scale(), r.width() / scale(), r.height() / scale());
+  return QRect(r.x() / currentScale(), r.y() / currentScale(), 
+               r.width() / currentScale(), 
+               r.height() / currentScale()).translated(viewTopLeft());
 }
 
 // Visible area in map coordinates
 QRect MapWidget::visibleArea()
 {
-  int mw = int(width() / scale());
-  int mh = int(height() / scale());
+  int mw = int(width() / currentScale());
+  int mh = int(height() / currentScale());
   QPoint c = center();
 
   return QRect(center() - QPoint(mw / 2, mh / 2), QSize(mw, mh));
@@ -230,10 +243,25 @@ QPoint MapWidget::viewTopLeft()
   return visibleArea().topLeft();
 }
 
-QPoint MapWidget::viewportToMap(QPoint p)
+
+void MapWidget::setLayer(int l)
 {
-  QPoint tl = viewTopLeft();
-  int x = tl.x() + int(p.x() / bumpedScale);
-  int y = tl.y() + int(p.y() / bumpedScale);
-  return QPoint(x, y);
+  selectedLayer = l;
+  tilesChanged();
+  repaint();
+}
+
+void MapWidget::showGrid(Datum d, bool utm, qreal interval)
+{
+  gridEnabled = true;
+  gridDatum = d;
+  gridUTM = utm;
+  gridInterval = interval;
+  repaint();
+}
+
+void MapWidget::hideGrid()
+{
+  gridEnabled = false;
+  repaint();
 }

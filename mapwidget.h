@@ -7,6 +7,7 @@
 #include <QPixmap>
 
 #include "map.h"
+#include "projection.h"
 class QPaintEvent;
 class QGestureEvent;
 class QPinchGesture;
@@ -26,15 +27,19 @@ public:
   // Center on a point in map coordinates
   void centerOn(QPoint p);
 
-  // Convert a view coordinate to a map coordinate
+  // Convert view coordinates to map coordinates
   QPoint viewToMap(QPoint v);
   QRect viewToMapRect(QRect v);
 
-  // Convert a viewport coordinate to a map coordinate
-  QPoint viewportToMap(QPoint v);
-
   // Visible area in map coordinates
   QRect visibleArea();
+
+  // Layer choice
+  void setLayer(int layer);
+
+  // Set grid projection
+  void showGrid(Datum d, bool utm, qreal interval);
+  void hideGrid();
 
 public slots:
   void tileUpdated(Tile key);
@@ -55,6 +60,8 @@ private:
   Map *map;
   MapRenderer *renderer;
 
+  // Display map tiles using smooth scaling? We turn smoothing off while zooming
+  // for speed, but we turn it on when we have a motionless map view.
   bool smoothScaling;
 
   qreal minScale, maxScale;
@@ -62,17 +69,25 @@ private:
   qreal scaleFactor;
   qreal scaleStep;
   qreal bumpedScale;
-  int   bumpedTileSize;
-  float scale() { return bumpedScale; }
+  qreal currentScale() { return bumpedScale; }
+  int currentLayer(); // Current map layer
 
-  // Last detected mouse position
+  // Last mouse position observed in a mouse move event
   QPoint lastMousePos;
+  bool panning; // Are we in the middle of a panning event?
 
-  int currentLayer;
+  // Current layer; negative means choose automatically
+  int selectedLayer;
+
+
+  // Map grid
+  bool gridEnabled;
+  Datum gridDatum;
+  bool gridUTM;
+  qreal gridInterval;
 
   bool gestureEvent(QGestureEvent *ev);
   void pinchGestureEvent(QPinchGesture *g);
-
 
   void positionChanged();
   void tilesChanged();

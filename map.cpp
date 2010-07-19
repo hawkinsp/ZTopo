@@ -3,6 +3,8 @@
 #include <QStringBuilder>
 #include <QStringRef>
 #include <algorithm>
+#include <cassert>
+#include <cstdio>
 #include <iostream>
 #include "consts.h"
 #include "map.h"
@@ -13,9 +15,27 @@ uint qHash(const Tile& k)
   return qHash(k.x) ^ qHash(k.y) ^ qHash(k.level) ^ qHash(k.layer);
 }
 
-Map::Map(MapProjection *p)
-  : proj(p), reqSize(p->mapSize())
+Map::Map(Datum d, Projection *pj, const QTransform &ptm, QSize mapSize)
+  : dDatum(d), pjProj(pj)
 {
+  bool invertible;
+  tProjToMap = ptm;
+  tMapToProj = ptm.inverted(&invertible);
+  assert(tProjToMap.type() <= QTransform::TxScale && invertible);
+
+  QPointF projOrigin = mapToProj().map(QPointF(0.0, 0.0));
+  printf("proj origin %f %f\n", projOrigin.x(), projOrigin.y());
+
+  QRectF projArea = QRectF(projOrigin, QSizeF(mapSize.width(), -mapSize.height())).normalized();
+  printf("proj area %f %f %f %f\n", projArea.left(), projArea.top(),
+         projArea.right(), projArea.bottom());
+  geoBounds = 
+    Geographic::getProjection(d)->transformFrom(pj, projArea)
+    .boundingRect().normalized().toAlignedRect();
+                                                          
+
+  reqSize = projToMap().mapRect(QRect(QPoint(0,0), mapSize)).size();
+
   int size = std::max(reqSize.width(), reqSize.height());
   logSize = 0;
   while (size > 0)
@@ -26,16 +46,30 @@ Map::Map(MapProjection *p)
   logBaseTileSz = 8;
   baseTileSz = 1 << logBaseTileSz;
   vMaxLevel = logSize - logBaseTileSz;
-  layers.append(Layer("24k", 12, 0));
-  layers.append(Layer("100k", 9, 1));
+
+
+
+  layers.append(Layer("100k", "1:100k Quad", 9));
+  layers.append(Layer("24k", "1:24k Quad", 12));
   //  layers.append(Layer("250k", 9, 1));
-  layers.append(Layer("base", 8, 2));
+  //layers.append(Layer("base", 8));
+}
+
+QRect Map::geographicBounds()
+{
+  return geoBounds;
+}
+
+QSizeF Map::mapPixelSize()
+{
+  QSizeF s = mapToProj().mapRect(QRectF(0, 0, 1, 1)).size();
+  return QSizeF(s.width(), -s.height());
 }
 
 int Map::bestLayerAtLevel(int level)
 {
-  if (level > 9) return 0;
-  return 1;
+  if (level > 9) return 1;
+  return 0;
   //  if (level > 8) return 1;
   //  return 2;
 }
@@ -172,10 +206,9 @@ QRect Map::rectAtLevel(QRect r, int fromLevel, int toLevel)
   }
 }
 
-int Map::zoomLevel(float scaleFactor)
+int Map::zoomLevel(qreal scaleFactor)
 {
-  float scale = std::max(std::min(scaleFactor, (float)1.0),
-                         epsilon);
-  float r = maxLevel() + log2f(scale);
-  return std::max(0, int(ceilf(r)));
+  qreal scale = std::max(std::min(scaleFactor, 1.0), epsilon);
+  qreal r = maxLevel() + log2(scale);
+  return std::max(0, int(ceil(r)));
 }

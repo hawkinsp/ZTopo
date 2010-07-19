@@ -5,8 +5,10 @@
 #include <QRect>
 #include <QSizeF>
 #include <QString>
+#include <QTransform>
 #include <QVector>
 
+#include "projection.h"
 class MapProjection;
 
 static const int tileDirectoryChunk = 3;
@@ -42,17 +44,31 @@ class Layer
 {
  public:
   Layer() { }
-  Layer(QString n, int z, int tc) : name(n), maxZoom(z), transparentColor(tc) { }
+  Layer(QString n, QString l, int z) : name(n), label(l), maxLevel(z) { }
 
-  QString name;
-  int maxZoom;
+  QString name, label;
+  int maxLevel;
 
-  int transparentColor;
 };
 
 class Map {
 public:
-  Map(MapProjection *proj);
+  Map(Datum d, Projection *pj, const QTransform &projToMap,
+      QSize mapSize);
+
+  // Conversions from map to projection space
+  const QTransform &mapToProj() { return tMapToProj; }
+  const QTransform &projToMap() { return tProjToMap; }
+
+  Datum datum() { return dDatum; }
+  Projection *projection() { return pjProj; }
+
+  // Bounds in geographic space
+  QRect geographicBounds();
+
+
+  // Size of a map pixel in projection units
+  QSizeF mapPixelSize();
 
   // Find the tile containing a given map point at a given level
   QPoint mapToTile(QPoint m, int level);
@@ -81,22 +97,31 @@ public:
   // toLevel that covers the same area
   QRect rectAtLevel(QRect r, int fromLevel, int toLevel);
 
-  MapProjection *projection() { return proj; }
-
   // Best level for viewing at a given scale factor
-  int zoomLevel(float scale);
+  int zoomLevel(qreal scale);
 
   // Best layer to display for a zoom level
   int bestLayerAtLevel(int level);
 
+  int numLayers() { return layers.size(); }
   const Layer &layer(int id) { return layers[id]; }
   bool layerByName(QString name, int &layer);
 
   Tile quadKeyToTile(int layer, QString quadKey);
 private:
-  QVector<Layer> layers;
 
-  MapProjection *proj;
+  Datum dDatum;
+
+  // Projection of projection space
+  Projection *pjProj;
+
+  // Transforms from projection space to map space and vice versa
+  QTransform tProjToMap;
+  QTransform tMapToProj;
+
+  QRect geoBounds;
+
+  QVector<Layer> layers;
 
   // Declared size of the map in pixels; the actual map will be
   // square and sized to the smallest power of 2 containing both axes of the

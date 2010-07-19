@@ -4,42 +4,11 @@
 #include <QPointF>
 #include <QRectF>
 #include <QSize>
-#include "ogr_spatialref.h"
+#include <QTransform>
+#include "projection.h"
 
-class MapProjection
-{
- public:
-  MapProjection();
-
-  // Convert a point from map space to projection space
-  QPointF mapToProj(QPointF m);
-
-  // Convert a point from projection space to map space
-  QPointF projToMap(QPointF p);
-  QRectF projToMap(QRectF p);
-
-  QSize mapSize();
-
-  // Size of a map pixel in meters
-  QSizeF pixelSize() { return mapPixelSize; }
-
-  // Convert a point in projection space to NAD83 Geographic
-  QPointF toGeographicNAD83(QPointF proj);
-
- private:
-  QPointF projOrigin; // Origin of the map space in projection space
-  QPointF projExtent; // Extent of the map space in projection space
-
-  int mapResolution; // Resolution of the map in pixels per inch
-  int mapScale;      // Scale of the map (1:mapScale)
-
-  QSizeF mapPixelSize; // Size of a map pixel in projection space
-
-  OGRSpatialReference projSpace;
-  OGRSpatialReference nad27GeographicSpace;
-  OGRSpatialReference nad83GeographicSpace;
-  OGRCoordinateTransformation *toNad83;
-
-};
+extern const char *californiaMapProjection;
+extern const QSize californiaMapSize;
+void californiaProjToMapTransform(QTransform &t);
 
 #endif

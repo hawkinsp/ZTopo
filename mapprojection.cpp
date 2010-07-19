@@ -3,57 +3,19 @@
 //#include "ogr_spatialref.h"
 #include <iostream>
 
+const char *californiaMapProjection =
+  "+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +ellps=GRS80 +datum=NAD83 +units=m +no_defs";
 
-MapProjection::MapProjection()
+void californiaProjToMapTransform(QTransform &t)
 {
-  projSpace.importFromProj4("+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +ellps=GRS80 +datum=NAD83 +units=m +no_defs");
-  nad27GeographicSpace.SetWellKnownGeogCS("NAD27");
-  nad83GeographicSpace.SetWellKnownGeogCS("NAD83");
-  toNad83 = OGRCreateCoordinateTransformation(&projSpace, &nad83GeographicSpace);
-  if (toNad83 == NULL) abort();
-
-  projOrigin = QPointF(-525000.0, 545000.0);
-  projExtent = QPointF(675000.0, -655000.0);
-
-  //  projOrigin = QPointF(-460000.0, 460000.0);
-  //  projExtent = QPointF(640000.0, -640000.0);
-  mapResolution = 400;
-  mapScale = 24000;
-
+  t = QTransform();
+  int mapResolution = 400;
+  int mapScale = 24000;
   float pixelSize = mapScale * metersPerInch / (float)mapResolution;
-  mapPixelSize = QSizeF(pixelSize, -pixelSize);
-  // std::cout << "pixel size" << pixelSize << std::endl;
+  t.scale(1/pixelSize, -1/pixelSize);
+  // Origin of the map is -525000, 545000 in projection space
+  t.translate(525000.0, -545000.0);
 }
 
-QSize MapProjection::mapSize()
-{
-  QPoint p = projToMap(projExtent).toPoint();
-  //  std::cout << "map size" << p.x() << " " << p.y() << std::endl;
-  return QSize(p.x(), p.y());
-}
+const QSize californiaMapSize(675000 + 525000, 545000 + 655000);
 
-QPointF MapProjection::mapToProj(QPointF m)
-{
-  return QPointF(m.x() * mapPixelSize.width() + projOrigin.x(),
-                 m.y() * mapPixelSize.height() + projOrigin.y());
-}
-
-QPointF MapProjection::projToMap(QPointF p)
-{
-  return QPointF((p.x() - projOrigin.x()) / mapPixelSize.width(),
-                 (p.y() - projOrigin.y()) / mapPixelSize.height());
-}
-
-QRectF MapProjection::projToMap(QRectF p)
-{
-  return QRectF(projToMap(p.topLeft()), projToMap(p.bottomRight()));
-}
-
-
-QPointF MapProjection::toGeographicNAD83(QPointF p)
-{
-  double x = p.x();
-  double y = p.y();
-  toNad83->Transform(1, &x, &y);
-  return QPointF(x, y);
-}

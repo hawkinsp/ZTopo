@@ -1,3 +1,4 @@
+#include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <cctype>
@@ -10,6 +11,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QImage>
+#include <QMap>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPointF>
@@ -21,33 +23,168 @@
 #include "map.h"
 #include "mapprojection.h"
 
+#include <ogrsf_frmts.h>
+
 using namespace std;
 
 
-static const qreal quadSize = 0.125;
-static const int numSidePoints = 4;
+// Size of a 7.5' quad in degrees
+static const qreal quadSize = 0.125; 
 
-// Return the boundary of a quad in NAD27 geographical coordinates
-void quadBoundary(QFileInfo filename,  QRectF &bounds, int &series)
+// Geographic quadrangles aren't rectangles in projection space; we described
+// quadrangles in projection space as polygons with numSidePoints points per
+// quadrangle side.
+static const int numSidePoints = 4;  
+
+// By how many DRG pixels is a quad permitted to overhang an image boundary before
+// we conclude that we have some sort of misalignment?
+static const qreal drgQuadSlackPixels = 5;
+
+class Quad {
+public:
+  Quad() { }
+  Quad(int s, QString i, QString n, QPolygonF b) 
+  : series(s), id(i), name(n), boundary(b) { }
+  int series;
+  QString id;
+  QString name;
+
+  // Quad boundary in projection coordinates
+  QPolygonF boundary;
+};
+
+// Not all quads are aligned to the regular quadrangle grid. Some are offset
+// or irregular sizes. We keep a list of exceptions.
+QMap<QString, Quad> quads;
+
+
+void readQuadIndex(int series, QString file, QString layerName, Projection *pj)
 {
+  OGRDataSource       *ds = OGRSFDriverRegistrar::Open(file.toLatin1().data(), false);
+  if (!ds) {
+    fprintf(stderr, "Could not open quad index '%s'.\n", file.toLatin1().data());
+    exit(-1);
+  }
+
+  OGRLayer  *layer;
+  layer = ds->GetLayerByName(layerName.toLatin1().data());
+  if (!layer) {
+    fprintf(stderr, "Could not read layer '%s'.\n", layerName.toLatin1().data());
+    exit(-1);
+  }
+
+  OGRSpatialReference *srs = layer->GetSpatialRef();
+  if (!srs) {
+    fprintf(stderr, "Missing spatial reference for layer '%s'.\n", 
+            layerName.toLatin1().data());
+    exit(-1);
+  }
+  char *proj = NULL;
+  srs->exportToProj4(&proj);
+  if (!proj) {
+    fprintf(stderr, "Error computing PROJ4 spatial reference for layer '%s'.\n", 
+            layerName.toLatin1().data());
+    exit(-1);
+  }
+  Projection pjIndex(proj);
+  CPLFree(proj);
+
+
+  layer->ResetReading();
+  OGRFeatureDefn *def = layer->GetLayerDefn();
+
+  int idFieldNr = def->GetFieldIndex("ID");
+  int nameFieldNr = def->GetFieldIndex("NAME");
+  if (idFieldNr < 0 || nameFieldNr < 0) {
+    fprintf(stderr, "Missing index layer fields.\n");
+    exit(-1);
+  }
+
+
+  OGRFeature *f;
+  while ((f = layer->GetNextFeature()) != NULL) {
+    QString id(f->GetFieldAsString(idFieldNr));
+    QString name(f->GetFieldAsString(nameFieldNr));
+
+    //    printf("Quad id: %s; name: %s\n", id.toLatin1().data(), name.toLatin1().data());
+
+    OGRGeometry *g;
+    g = f->GetGeometryRef();
+    if (g != NULL && wkbFlatten(g->getGeometryType()) == wkbPolygon) {
+      OGRPolygon *p = (OGRPolygon *)g;
+      OGRLinearRing *r = p->getExteriorRing();
+      if (!r) {
+        fprintf(stderr, "Quad has no exterior polygon ring %s\n", 
+                id.toLatin1().data());
+        continue;
+      }
+
+      int size = r->getNumPoints();
+      QPolygonF boundary;
+      for (int i = 0; i < size; i++) {
+        OGRPoint p;
+        r->getPoint(i, &p);
+        boundary << QPointF(p.getX(), p.getY());
+      }
+
+      QPolygonF projBoundary = pj->transformFrom(&pjIndex, boundary);
+      
+      quads[id] = Quad(series, id, name, projBoundary);
+    } else {
+      fprintf(stderr, "Missing or invalid geometry for quad %s\n", 
+              id.toLatin1().data());
+    }
+  }
+
+  OGRDataSource::DestroyDataSource(ds);
+}
+
+void makePolygon(QPolygonF &p, const QRectF &r)
+{
+  QPolygonF rp(r);
+  for (int a = 0; a < rp.size(); a++) {
+    int b = (a + 1 == rp.size()) ? 0 : a + 1;
+    for (int i = 0; i < numSidePoints; i++) {
+      double pos = double(i) / double(numSidePoints);
+      double x = (1.0 - pos) * rp[a].x() + pos * rp[b].x();
+      double y = (1.0 - pos) * rp[a].y() + pos * rp[b].y();
+      p << QPointF(x, y);
+    }
+  }
+}
+
+
+// Return the boundary of a quad in projection space, based on the
+// first 8 bytes of the filename.
+// Reference: http://topomaps.usgs.gov/drg/drg_name.html
+void getQuadInfo(QFileInfo filename, Projection *pj, Quad &quad)
+{
+  QString baseName = filename.baseName();
   QByteArray name = filename.baseName().toLatin1();
   QSizeF size;
-  if (name.size() < 8) goto bad;
-  switch (name[0]) {
-  case 'o':
-    // 1:24000 series
-    size = QSizeF(quadSize, -quadSize); // 7.5' quads
-    series = 0;
-    break;
-  case 'f':
-    // 1:100000 series
-    size = QSizeF(1.0, -0.5); // 60' x 30' quads
-    series = 1;
-    break;
-  default:
-    goto bad;
-  }
-  {
+  int series;
+
+  if (baseName.size() != 8) goto bad;
+
+  if (quads.contains(baseName)) {
+    quad = quads[baseName];
+  } else {
+    printf("Quad not found in index, using defaults\n");
+    switch (name[0]) {
+    case 'o':
+      // 1:24000 series
+      size = QSizeF(quadSize, quadSize); // 7.5' quads
+      series = 1;
+      break;
+    case 'f':
+      // 1:100000 series
+      size = QSizeF(1.0, 0.5); // 60' x 30' quads
+      series = 0;
+      break;
+    default:
+      goto bad;
+    }
+
     if (!isdigit(name[1]) || !isdigit(name[2])) goto bad;
     qreal y = qreal(10 * (name[1] - '0') + (name[2] - '0'));
     
@@ -59,9 +196,14 @@ void quadBoundary(QFileInfo filename,  QRectF &bounds, int &series)
     int subx = name[7] - '1';
     
     x += quadSize * subx + size.width();
-    y += quadSize * suby - size.height();
+    y += quadSize * suby;
     
-    bounds = QRectF(QPointF(-x, y), size);
+    QRectF r(QPointF(-x, y), size);
+    QPolygonF geoBounds;
+    makePolygon(geoBounds, r);
+    QPolygonF projBounds = 
+      pj->transformFrom(Geographic::getProjection(NAD27), geoBounds);
+    quad = Quad(series, baseName, baseName, projBounds);
   } 
   return;
  bad:
@@ -69,39 +211,26 @@ void quadBoundary(QFileInfo filename,  QRectF &bounds, int &series)
   exit(-1);
 }
 
-void addPolygonSide(OGRCoordinateTransformation *ct, 
-                    QPolygonF &p, QPointF from, QPointF to)
-{
-  for (int i = 0; i < numSidePoints; i++) {
-    double pos = double(i) / double(numSidePoints);
-    double x = (1.0 - pos) * from.x() + pos * to.x();
-    double y = (1.0 - pos) * from.y() + pos * to.y();
-    ct->Transform(1, &x, &y);
-    p << QPointF(x, y);
-  }
-}
-
-// Transform quad boundary into projection space
-QPolygonF projectQuadBoundary(OGRCoordinateTransformation *ct, QRectF quad)
-{
-  QPolygonF p;
-  addPolygonSide(ct, p, quad.topLeft(), quad.topRight());
-  addPolygonSide(ct, p, quad.topRight(), quad.bottomRight());
-  addPolygonSide(ct, p, quad.bottomRight(), quad.bottomLeft());
-  addPolygonSide(ct, p, quad.bottomLeft(), quad.topLeft());
-  return p;
-}
-
 int main(int argc, char **argv)
 {
-  MapProjection mapProj;
-  Map map(&mapProj);
-
   if (argc < 2) {
-    fprintf(stderr, "import file\n");
+    fprintf(stderr, "import <file.tif>\n");
     return -1;
   }
+
+  OGRRegisterAll();
   GDALAllRegister();
+
+  QTransform tr;
+
+  Projection *pjGeo = Geographic::getProjection(NAD27);
+  Projection *pj = new Projection(californiaMapProjection);
+  californiaProjToMapTransform(tr);
+
+  Map map(NAD27, pj, tr, californiaMapSize);
+
+
+  readQuadIndex(1, "/Users/hawkinsp/geo/drg/index/drg24.shp", "drg24", pj);
 
   QFileInfo filename(argv[1]);
 
@@ -109,16 +238,29 @@ int main(int argc, char **argv)
                                             GA_ReadOnly);
   const char *proj = ds->GetProjectionRef();
 
+  Quad quad;
+  getQuadInfo(filename, pj, quad);
+
   // Read projection
   OGRSpatialReference srs;
   srs.importFromWkt((char **)&proj);
 
-  // Read geotransform
-  double geotransform[6];
-  ds->GetGeoTransform(geotransform);
+  // Size of the DRG
+  QSize drgSize = QSize(ds->GetRasterXSize(), ds->GetRasterYSize());
+  printf("DRG id: %s, name %s, size %dx%d\n", quad.id.toLatin1().data(),
+         quad.name.toLatin1().data(), drgSize.width(), drgSize.height());
 
-  QPointF fProjTopLeft = QPointF(geotransform[0], geotransform[3]);
-  QSizeF fPixelSize = QSizeF(geotransform[1], geotransform[5]);
+  // ------------------------------------------
+  // Read geotransform coefficients. The geotransform describe the mapping from
+  // DRG image space to projection space.
+  double geoTransformCoeff[6];
+  ds->GetGeoTransform(geoTransformCoeff);
+
+  // Top left coordinate of the drg in projection space
+  QPointF fProjTopLeft = QPointF(geoTransformCoeff[0], geoTransformCoeff[3]);
+
+  // Size of a drg pixel in projection space
+  QSizeF fPixelSize = QSizeF(geoTransformCoeff[1], geoTransformCoeff[5]);
 
   // Check Y pixel size is the negation of the X pixel size
   if (fabs(fPixelSize.width() + fPixelSize.height()) >= epsilon) {
@@ -126,21 +268,37 @@ int main(int argc, char **argv)
     return -1;
   }
 
-  if (fabs(geotransform[2]) >= epsilon || fabs(geotransform[4]) >= epsilon) {
-    fprintf(stderr, "Geotransform has shear component\n");
+  // We assume the geotransform consists of only translation and scaling. 
+  // We'd need to do a more general image transformation to handle shearing.
+  if (fabs(geoTransformCoeff[2]) >= epsilon 
+      || fabs(geoTransformCoeff[4]) >= epsilon) {
+    fprintf(stderr, "ERROR: DRG geotransform has shear component.\n");
     return -1;
   }
 
+  // Transforms from drg space to projection space and vice versa
+  QTransform drgProjTransform;
+  drgProjTransform.translate(fProjTopLeft.x(), fProjTopLeft.y());
+  drgProjTransform.scale(fPixelSize.width(), fPixelSize.height());
+  QTransform projDrgTransform = drgProjTransform.inverted();
+
+
+  // Size of the DRG in projection space
   QSizeF fProjSize = QSizeF(qreal(ds->GetRasterXSize()) * fPixelSize.width(),
                             qreal(ds->GetRasterYSize()) * fPixelSize.height());
   QRectF projRect = QRectF(fProjTopLeft, fProjSize);
 
   // Rectangle covered by the entire map image
-  QRectF mapRect = mapProj.projToMap(projRect);
+  QRectF mapRect = map.projToMap().mapRect(projRect);
+
+  printf("Map Rect: %lf %lf %lf %lf\n", mapRect.left(), mapRect.top(),
+         mapRect.right(), mapRect.bottom());
 
 
   // Compute the initial scale factor and tile level
-  QSizeF mapPixelSize = mapProj.pixelSize();
+  QSizeF mapPixelSize = map.mapPixelSize();
+  assert(mapPixelSize.width() + mapPixelSize.height() < epsilon);
+
   QSizeF scale(fPixelSize.width() / mapPixelSize.width(),
                fPixelSize.height() / mapPixelSize.height());
   int maxLevel = map.maxLevel();
@@ -154,25 +312,37 @@ int main(int argc, char **argv)
   //return 0;
 
   // Compute the quad boundary
-  OGRSpatialReference nad27;
-  nad27.SetWellKnownGeogCS("NAD27");
+  QPolygonF projQuad(quad.boundary);
 
-  OGRCoordinateTransformation *ct = OGRCreateCoordinateTransformation(&nad27, &srs);
-  if (ct == NULL) {
-    fprintf(stderr, "Couldn't create coordinate transformation\n");
-    return -1;
+
+  QPolygonF geoQuad = pjGeo->transformFrom(pj, projQuad);
+  QRectF geoQuadBounds(geoQuad.boundingRect());
+  printf("Series: %d %s\n", quad.series, map.layer(quad.series).name.toLatin1().data());
+  printf("Geographic quad boundary: %lf %lf %lf %lf\n", geoQuadBounds.left(),
+         geoQuadBounds.top(), geoQuadBounds.right(), geoQuadBounds.bottom());
+
+
+  // Quad bounding rectangle in map space
+  QRectF projQuadBounds = projQuad.boundingRect();
+  QRectF mapQuadBounds = map.projToMap().mapRect(projQuadBounds);
+  printf("Quad bounding rectangle in map space: %lf %lf %lf %lf\n", 
+         mapQuadBounds.left(), mapQuadBounds.top(),
+         mapQuadBounds.right(), mapQuadBounds.bottom());
+
+
+  // Quad bounding rectangle in drg space
+  QRectF drgQuadBounds = projDrgTransform.mapRect(projQuadBounds);
+  printf("Quad bounding rectangle in drg space: %lf %lf %lf %lf\n", 
+         drgQuadBounds.left(), drgQuadBounds.top(),
+         drgQuadBounds.right(), drgQuadBounds.bottom());
+
+  if (drgQuadBounds.left() < -drgQuadSlackPixels ||
+      drgQuadBounds.right() > drgSize.width() + drgQuadSlackPixels ||
+      drgQuadBounds.top() < -drgQuadSlackPixels ||
+      drgQuadBounds.bottom() > drgSize.height() + drgQuadSlackPixels) {
+    fprintf(stderr, "ERROR: DRG and quadrangle boundaries are misaligned!\n");
+    exit(-1);
   }
-  QRectF quad;
-  int series;
-  quadBoundary(filename, quad, series);
-  printf("Series: %d %s\n", series, map.layer(series).name.toLatin1().data());
-  printf("Quad: %lf %lf %lf %lf\n", quad.left(), quad.top(), quad.right(), 
-         quad.bottom());
-
-  QPolygonF projectedQuad = projectQuadBoundary(ct, quad);
-
-  // Rectangle covered by the quadrangle data
-  QRectF mapBoundingRect = mapProj.projToMap(projectedQuad.boundingRect());
 
   /*printf("top left %lf %lf\n", fProjTopLeft.x(), fProjTopLeft.y());*/
   /*for (int i = 0; i< projectedQuad.size(); i++) {
@@ -195,19 +365,17 @@ int main(int argc, char **argv)
                                    Qt::SmoothTransformation);
 
     QPolygonF imageQuad;
-    for (int i = 0; i < projectedQuad.size(); i++) {
-      QPointF p = projectedQuad[i] - fProjTopLeft;
+    for (int i = 0; i < projQuad.size(); i++) {
+      QPointF p = projQuad[i] - fProjTopLeft;
       imageQuad << QPointF(p.x() * scale.width() / fPixelSize.width(), 
                            p.y() * scale.height() / fPixelSize.height());
     }
 
     QSizeF baseTileSize(map.baseTileSize(), map.baseTileSize());
     int tileSize = map.tileSize(level);
-    /*    printf("map bounding rect %lf %lf %lf %lf\n", mapBoundingRect.left(), mapBoundingRect.top(), 
-          mapBoundingRect.right(), mapBoundingRect.bottom());*/
 
-    QRectF tileRectF = QRectF(mapBoundingRect.bottomLeft() / qreal(tileSize),
-                              mapBoundingRect.topRight() / qreal(tileSize));
+    QRectF tileRectF = QRectF(mapQuadBounds.topLeft() / qreal(tileSize),
+                              mapQuadBounds.bottomRight() / qreal(tileSize));
     QRect tileRect(QPoint(int(floor(tileRectF.left())), int(floor(tileRectF.top()))),
                    QPoint(int(ceil(tileRectF.right())), 
                           int(ceil(tileRectF.bottom()))));
@@ -215,7 +383,7 @@ int main(int argc, char **argv)
           tileRect.right(), tileRect.bottom());*/
     for (int tileY = tileRect.top(); tileY <= tileRect.bottom(); tileY++) {
       for (int tileX = tileRect.left(); tileX <= tileRect.right(); tileX++) {
-        Tile key(tileX, tileY, level, series);
+        Tile key(tileX, tileY, level, quad.series);
 
         QPointF tileTopLeft(tileX * tileSize, tileY * tileSize);
         QPointF deltaTileTopLeft = tileTopLeft - mapRect.topLeft();

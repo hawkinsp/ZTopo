@@ -22,8 +22,11 @@ int main(int argc, char **argv)
   }
 
 
-  MapProjection mapProj;
-  Map map(&mapProj);
+  QTransform tr;
+  Projection *pj = new Projection(californiaMapProjection);
+  californiaProjToMapTransform(tr);
+
+  Map map(pj, tr, californiaMapSize);
 
   int layer;
   if (!map.layerByName(layerName, layer)) {
