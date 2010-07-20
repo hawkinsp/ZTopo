@@ -1,8 +1,12 @@
 #include <QApplication>
 #include <QMetaType>
 #include <QPixmapCache>
+#include <QTransform>
 #include "mainwindow.h"
 #include "map.h"
+#include "mapprojection.h"
+#include "projection.h"
+
 
 int main(int argc, char **argv)
 {
@@ -12,9 +16,14 @@ int main(int argc, char **argv)
 
   QApplication app(argc, argv);
 
-  MainWindow window;
+  QTransform ctr;
+  Projection pj(californiaMapProjection);
+  californiaProjToMapTransform(ctr);
+  Map map(NAD83, &pj, ctr, californiaMapSize);
+
+  MainWindow *window = new MainWindow(&map);
   QPixmapCache::setCacheLimit(50000);
 
-  window.show();
+  window->show();
   return app.exec();
 }

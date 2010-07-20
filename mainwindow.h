@@ -37,15 +37,8 @@ class MainWindow : public QMainWindow
   Q_OBJECT
 
 public:
-  MainWindow(QWidget *parent = 0);
+  MainWindow(Map *m, QWidget *parent = 0);
   ~MainWindow();
-
-public slots:
-  void updatePosition(QPoint pos);
-  void scaleChanged(float scale);
-
-  void pageSetupTriggered(bool);
-  void printTriggered(bool);
 
 protected:
   virtual void closeEvent(QCloseEvent *);
@@ -60,12 +53,19 @@ private slots:
   void zoomInTriggered();
   void zoomOutTriggered();
 
+  void newWindowTriggered();
   void minimizeTriggered();
   void windowZoomTriggered();
   void bringFrontTriggered();
+  void windowActionTriggered(QAction *);
 
-  void scaleEditingFinished();
-  void posEditingFinished();
+  void updatePosition(QPoint pos);
+  void scaleChanged(float scale);
+
+  void pageSetupTriggered(bool);
+  void printTriggered(bool);
+
+  void searchEditingFinished();
  
 
 private:
@@ -77,6 +77,7 @@ private:
   QPoint lastCursorPos;
 
   QVector<CoordFormatter *> coordFormats;
+  QActionGroup *windowActions;
 
   // Possible grids to display
   QVector<Grid> grids;
@@ -84,16 +85,18 @@ private:
   // Dots per meter of the current screen
   qreal screenDotsPerMeter;
 
+  QToolBar *toolBar;
 
   // Status bar
-  QLineEdit *posLine;     // Current position
-  QRegExpValidator *posValidator;
-  QLineEdit *scaleLine;   // Current scale
+  QLineEdit *searchLine;
+  QLabel *posLabel;     // Current position
+  QLabel *scaleLabel;   // Current scale
 
   // Print dock widget
   QDockWidget *printDock;
 
   // Actions
+  QAction *newWindowAction;
   QAction *printAction;
   QAction *pageSetupAction;
 
@@ -102,6 +105,8 @@ private:
   QActionGroup *datumActionGroup;
   QActionGroup *gridActionGroup;
   QAction *showRulerAction;
+
+  QAction *showToolBarAction, *showStatusBarAction;
   
   QAction *zoomInAction, *zoomOutAction;
 
@@ -109,6 +114,7 @@ private:
   QAction *minimizeAction;
   QAction *zoomAction;
   QAction *bringFrontAction;
+  QMenu *windowMenu;
 
   void createActions();
   void createMenus();
@@ -117,6 +123,8 @@ private:
 
   Datum currentDatum();
   CoordFormatter *currentCoordFormatter();
+
+  void windowListChanged();
 };
 
 

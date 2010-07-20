@@ -232,10 +232,20 @@ int main(int argc, char **argv)
 
   readQuadIndex(1, "/Users/hawkinsp/geo/drg/index/drg24.shp", "drg24", pj);
 
+  // Index information seems buggy for these quads -- just use the regular grid.
+  quads.remove("o37122g4"); // San Francisco North
+  quads.remove("o37122g5"); // Point Bonita
+
+
   QFileInfo filename(argv[1]);
 
   GDALDataset *ds = (GDALDataset *)GDALOpen(filename.filePath().toLatin1().data(),
                                             GA_ReadOnly);
+  if (!ds) {
+    fprintf(stderr, "ERROR: Could not open dataset.\n");
+    return -1;
+  }
+
   const char *proj = ds->GetProjectionRef();
 
   Quad quad;
@@ -331,17 +341,32 @@ int main(int argc, char **argv)
 
 
   // Quad bounding rectangle in drg space
-  QRectF drgQuadBounds = projDrgTransform.mapRect(projQuadBounds);
+  QPolygonF drgBounds = projDrgTransform.map(projQuad);
+  QRectF drgQuadBounds = drgBounds.boundingRect();
   printf("Quad bounding rectangle in drg space: %lf %lf %lf %lf\n", 
          drgQuadBounds.left(), drgQuadBounds.top(),
          drgQuadBounds.right(), drgQuadBounds.bottom());
+
+
+  // Read the image
+  QImage drg(filename.filePath());
 
   if (drgQuadBounds.left() < -drgQuadSlackPixels ||
       drgQuadBounds.right() > drgSize.width() + drgQuadSlackPixels ||
       drgQuadBounds.top() < -drgQuadSlackPixels ||
       drgQuadBounds.bottom() > drgSize.height() + drgQuadSlackPixels) {
-    fprintf(stderr, "ERROR: DRG and quadrangle boundaries are misaligned!\n");
-    exit(-1);
+    QString mfile("misalign-" + filename.baseName() + ".png");
+    fprintf(stderr, "WARNING: DRG and quadrangle boundaries are misaligned; diagnostic saved to '%s'!\n", mfile.toLatin1().data());
+
+    QImage image = drg.convertToFormat(QImage::Format_RGB32);
+    QPainter p;
+    p.begin(&image);
+    QPainterPath pp;
+    pp.addPolygon(drgBounds);
+    p.setPen(QPen(Qt::blue, 2));
+    p.drawPath(pp);
+    p.end();
+    image.save(mfile, "png");
   }
 
   /*printf("top left %lf %lf\n", fProjTopLeft.x(), fProjTopLeft.y());*/
@@ -351,8 +376,6 @@ int main(int argc, char **argv)
 
 
 
-  // Read the image
-  QImage drg(filename.filePath());
   QDir dir;
 
   //  for (int level = maxLevel; level >= 0; level--, scale /= 2.0) {

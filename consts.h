@@ -9,5 +9,6 @@ static const qreal metersPerMile = 1609.344;
 static const qreal minutesPerDegree = 60.0;
 static const qreal degreesPerMinute = 1/60.0;
 static const qreal degreesPerRadian = 180.0 / M_PI;
+static const QChar degree(0x00b0);
 
 #endif

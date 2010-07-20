@@ -187,6 +187,8 @@ void MapWidget::paintEvent(QPaintEvent *ev)
   QRect mr = visibleArea();
 
   QPainter p(viewport());
+  p.setBackground(Qt::white);
+  p.eraseRect(p.viewport());
   p.setRenderHint(QPainter::SmoothPixmapTransform, smoothScaling);
   renderer->render(p, currentLayer(), mr, currentScale());
   if (gridEnabled) {
