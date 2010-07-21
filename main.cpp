@@ -7,6 +7,7 @@
 #include "mapprojection.h"
 #include "projection.h"
 
+#include <QFile>
 
 int main(int argc, char **argv)
 {
@@ -20,6 +21,10 @@ int main(int argc, char **argv)
   Projection pj(californiaMapProjection);
   californiaProjToMapTransform(ctr);
   Map map(NAD83, &pj, ctr, californiaMapSize);
+  for (int layer = 0; layer < map.numLayers(); layer++) {
+    QFile missing(map.missingTilesPath(layer));
+    map.loadMissingTiles(layer, missing);
+  }
 
   MainWindow *window = new MainWindow(&map);
   QPixmapCache::setCacheLimit(50000);

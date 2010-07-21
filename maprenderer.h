@@ -87,7 +87,8 @@ private:
   // Tiles are present but have value NULL if they are queued to be loaded from disk.
   QMap<Tile, QPixmap> tileMap;
 
-  void findTile(Tile key, QPixmap &p, QRect &r);
+  //  void findTile(Tile key, QPixmap &p, QRect &r);
+  void drawTile(Tile key, QPainter &p, const QRect &r);
 
   QPointF mapToView(QPoint origin, qreal scale, QPointF p);
 

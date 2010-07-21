@@ -1,6 +1,7 @@
 #ifndef MAP_H
 #define MAP_H 1
 
+#include <QIODevice>
 #include <QPointF>
 #include <QRect>
 #include <QSizeF>
@@ -8,8 +9,8 @@
 #include <QTransform>
 #include <QVector>
 
+#include "prefix.h"
 #include "projection.h"
-class MapProjection;
 
 static const int tileDirectoryChunk = 3;
 
@@ -46,9 +47,11 @@ class Layer
   Layer() { }
   Layer(QString n, QString l, int z) : name(n), label(l), maxLevel(z) { }
 
+
   QString name, label;
   int maxLevel;
 
+  PrefixTree missingTiles;
 };
 
 class Map {
@@ -84,6 +87,10 @@ public:
   // Filename of a given tile
   QString tilePath(Tile t);
 
+  // Filename of the missing tiles file
+  QString missingTilesPath(int layer);
+  void loadMissingTiles(int layer, QIODevice &d);
+
   int maxLevel() { return vMaxLevel; }
 
   // Given a rectangle in map coordinates, produce the smallest rectangle of tiles 
@@ -108,6 +115,9 @@ public:
   bool layerByName(QString name, int &layer);
 
   Tile quadKeyToTile(int layer, QString quadKey);
+  QString tileToQuadKey(Tile t);
+  unsigned int quadKeyToQuadKeyInt(QString quadKey);
+  unsigned int tileToQuadKeyInt(Tile t);
 private:
 
   Datum dDatum;
@@ -136,7 +146,6 @@ private:
   int logBaseTileSz;
   int vMaxLevel;     // Number of levels of the tile pyramid
 
-  QString tileToQuadKey(Tile t);
 };
 
 #endif

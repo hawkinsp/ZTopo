@@ -67,6 +67,7 @@ void MapWidget::zoomChanged()
   int layer = selectedLayer < 0 ? map->bestLayerAtLevel(level) : selectedLayer;
   int bumpedTileSize;
   renderer->bumpScale(layer, scaleFactor * scaleStep, bumpedScale, bumpedTileSize);
+  //  bumpedScale = scaleFactor * scaleStep;
 
   updateScrollBars();
 

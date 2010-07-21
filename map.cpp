@@ -2,6 +2,7 @@
 #include <QSet>
 #include <QStringBuilder>
 #include <QStringRef>
+#include <QTextStream>
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -130,6 +131,34 @@ QString Map::tileToQuadKey(Tile tile)
   return quad;
 }
 
+unsigned int Map::tileToQuadKeyInt(Tile tile)
+{
+  unsigned int quad = 1;
+  int x = tile.x, y = tile.y;
+  for (int i = 0; i < tile.level; i++) {
+    int mask = 1 << i;
+    quad <<= 2;
+    if (x & mask) {
+      quad |= 1;
+    }
+    if (y & mask) {
+      quad |= 2;
+    }
+  }
+  return quad;
+}
+
+unsigned int Map::quadKeyToQuadKeyInt(QString quad)
+{
+  unsigned int q = 1;
+  for (int i = quad.length() - 1; i >= 0; i--) {
+    int c = quad[i].digitValue();
+    assert((c & ~3) == 0);
+    q = (q << 2) | c;
+  }
+  return q;
+}
+
 Tile Map::quadKeyToTile(int layer, QString quad)
 {
   int x = 0, y = 0, level = quad.length();
@@ -148,6 +177,35 @@ Tile Map::quadKeyToTile(int layer, QString quad)
   return Tile(x, y, level, layer);
 }
 
+
+QString Map::missingTilesPath(int layer) {
+  return "tiles/" % layers[layer].name % "/missing.txtz";
+}
+
+void Map::loadMissingTiles(int layer, QIODevice &d)
+{
+  d.open(QIODevice::ReadOnly);
+  QByteArray missingCompressed(d.readAll());
+  d.close();
+  if (missingCompressed.isEmpty()) {
+    fprintf(stderr, "Empty missing tile data for layer %s!\n", layers[layer].name.toLatin1().data());
+    return;
+  }
+
+  QByteArray mData(qUncompress(missingCompressed));
+  if (mData.isEmpty()) {
+    fprintf(stderr, "Bad missing tile data for layer %s!\n", layers[layer].name.toLatin1().data());
+    return;
+  }
+  QTextStream mStream(mData);
+  
+  while (true) {
+    QString l = mStream.readLine();
+    if (l.isNull()) break;
+    unsigned int q = quadKeyToQuadKeyInt(l);
+    layers[layer].missingTiles.add(q);
+  }
+}
 
 QString Map::tilePath(Tile t)
 {

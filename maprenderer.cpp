@@ -78,6 +78,7 @@ MapRenderer::MapRenderer(Map *m, QObject *parent)
   }
 }
 
+
 void MapRenderer::tileLoaded(Tile key, QString filename, QImage img)
 {
   outstandingTiles--;
@@ -97,9 +98,18 @@ void MapRenderer::tileLoaded(Tile key, QString filename, QImage img)
   }
 }
 
+void MapRenderer::bumpScale(int layer, qreal scale, qreal &bumpedScale,
+                            int &bumpedTileSize)
+{
+  int level = std::min(map->zoomLevel(scale), map->layer(layer).maxLevel);
+  int tileSize = map->tileSize(level);
+  bumpedTileSize = int(tileSize * scale);
+  bumpedScale = float(bumpedTileSize) / float(tileSize);
+}
+
 // Find the tile we requested, or identify a section of an ancestor tile that
 // we can use until the correct tile is loaded.
-void MapRenderer::findTile(Tile key, QPixmap &p, QRect &r)
+/*void MapRenderer::findTile(Tile key, QPixmap &p, QRect &r)
 {
   for (int level = key.level; level >= 0; level--) {
     int deltaLevel = key.level - level;
@@ -118,16 +128,69 @@ void MapRenderer::findTile(Tile key, QPixmap &p, QRect &r)
       }
     }
   }
+  }*/
+
+void MapRenderer::drawTile(Tile key, QPainter &p, const QRect &dstRect)
+{
+  int logTileSize = map->logBaseTileSize();
+
+  // Look in the current level. If found, we're done and we need not draw
+  // anything else
+  for (int layer = key.layer; layer >= 0; layer--) {
+    Tile t(key.x, key.y, key.level, layer);
+    if (tileMap.contains(t) && !tileMap[t].isNull()) {
+      p.drawPixmap(dstRect, tileMap[t], 
+                   QRect(0, 0, 1 << logTileSize, 1 << logTileSize));
+      return;
+    }
+  }
+
+  // Look at all levels above us
+  bool doneAbove = false;
+  for (int level = key.level - 1; !doneAbove && level >= 0; level--) {
+    int deltaLevel = key.level - level;
+    for (int layer = key.layer; !doneAbove && layer >= 0; layer--) {
+      Tile t(key.x >> deltaLevel, key.y >> deltaLevel, level, layer);
+
+      if (tileMap.contains(t) && !tileMap[t].isNull()) {
+        // Size of the destination tile in the source space
+        int logSubSize = logTileSize - deltaLevel;
+        int mask = (1 << deltaLevel) - 1;
+        int subX = (key.x & mask) << logSubSize;
+        int subY = (key.y & mask) << logSubSize;
+        int size = 1 << logSubSize;
+        p.drawPixmap(dstRect, tileMap[t], QRect(subX, subY, size, size));
+        doneAbove = true;
+      }
+    }
+  }
+
+  // Look one level below us. Overdraw whatever we can find on whatever we already
+  // drew.
+  int level = key.level + 1;
+  int deltaLevel = 1;
+  int deltaSize = 1 << deltaLevel;
+  for (int x = 0; x < deltaSize; x++) {
+    for (int y = 0; y < deltaSize; y++) {
+      bool found = false;
+      for (int layer = map->numLayers(); !found && layer >= 0; layer--) {
+        Tile t((key.x << deltaLevel) + x, (key.y << deltaLevel) + y, level, layer);
+        if (tileMap.contains(t) && !tileMap[t].isNull()) {
+          // Size of the source tile in the destination space
+          qreal dstSizeX = qreal(dstRect.width()) / qreal(1 << deltaLevel);
+          qreal dstSizeY = qreal(dstRect.height()) / qreal(1 << deltaLevel);
+          QRectF dstSubRect(dstRect.left() + dstSizeX * x, 
+                            dstRect.top() + dstSizeY * y, dstSizeX, dstSizeY);
+          p.drawPixmap(dstSubRect, tileMap[t], 
+                        QRectF(0, 0, 1 << logTileSize, 1 << logTileSize));
+          found = true;
+        }
+      }
+    }
+  }
+
 }
 
-void MapRenderer::bumpScale(int layer, qreal scale, qreal &bumpedScale,
-                            int &bumpedTileSize)
-{
-  int level = std::min(map->zoomLevel(scale), map->layer(layer).maxLevel);
-  int tileSize = map->tileSize(level);
-  bumpedTileSize = int(tileSize * scale);
-  bumpedScale = float(bumpedTileSize) / float(tileSize);
-}
 
 void MapRenderer::render(QPainter &p, int layer, QRect mr, qreal scale)
 {
@@ -148,16 +211,17 @@ void MapRenderer::render(QPainter &p, int layer, QRect mr, qreal scale)
   for (int x = visibleTiles.left(); x <= visibleTiles.right(); x++) {
     for (int y = visibleTiles.top(); y <= visibleTiles.bottom(); y++) {
       Tile key(x, y, level, layer);
-      QPixmap px;
-      QRect r;
+      //      QPixmap px;
+      //      QRect r;
+      int vx = x * bumpedTileSize - mx;
+      int vy = y * bumpedTileSize - my;
+      QRect dstRect(vx, vy, bumpedTileSize, bumpedTileSize);
 
-      findTile(key, px, r);
+      drawTile(key, p, dstRect);
 
-      if (!px.isNull()) {
-        int vx = x * bumpedTileSize - mx;
-        int vy = y * bumpedTileSize - my;
+      /*      if (!px.isNull()) {
         p.drawPixmap(QRect(vx, vy, bumpedTileSize, bumpedTileSize), px, r);
-      }
+        }*/
     }
   }
 
@@ -189,7 +253,8 @@ void MapRenderer::loadTiles(int layer, QRect vis, qreal scale, bool wait)
       if (!tileMap.contains(key)) {
         QString filename = map->tilePath(key);
         QPixmap p;
-        if (!QPixmapCache::find(filename, &p)) {
+        if (!QPixmapCache::find(filename, &p) && 
+            !map->layer(layer).missingTiles.containsPrefix(map->tileToQuadKeyInt(key))) {
           // Queue the tile for reading
           
           int size = 0;
