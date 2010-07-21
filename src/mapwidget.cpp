@@ -16,6 +16,7 @@
 MapWidget::MapWidget(Map *m, MapRenderer *r, QWidget *parent)
   : QAbstractScrollArea(parent), map(m), renderer(r)
 {
+  renderer->addClient(this);
   selectedLayer = -1;
   scaleFactor = 1.0;
   scaleStep = 1.0;
@@ -31,8 +32,8 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, QWidget *parent)
 
   connect(r, SIGNAL(tileUpdated(Tile)), this, SLOT(tileUpdated(Tile)));
 
-  //  setViewport(new QWidget());
-  setViewport(new QGLWidget(QGLFormat(QGL::SampleBuffers)));
+  setViewport(new QWidget());
+ // setViewport(new QGLWidget(QGLFormat(QGL::SampleBuffers)));
   setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
@@ -40,6 +41,11 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, QWidget *parent)
   smoothScaling = true;
   grabGesture(Qt::PinchGesture);
   zoomChanged();
+}
+
+MapWidget::~MapWidget()
+{
+  renderer->removeClient(this);
 }
 
 void MapWidget::updateScrollBars()
@@ -177,7 +183,6 @@ int MapWidget::currentLayer()
 void MapWidget::tilesChanged()
 {
   QRect vis(visibleArea());
-  renderer->pruneTiles(vis);
   renderer->loadTiles(currentLayer(), vis, currentScale());
 }
 

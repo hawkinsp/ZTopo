@@ -30,15 +30,13 @@
 
 QVector<MainWindow *> windowList;
 
-MainWindow::MainWindow(Map *m, QWidget *parent)
-  : QMainWindow(parent), map(m)
+MainWindow::MainWindow(Map *m, MapRenderer *r, QWidget *parent)
+  : QMainWindow(parent), map(m), renderer(r)
 {
   setAttribute(Qt::WA_DeleteOnClose);
   setWindowTitle(tr("Topographic Map Viewer"));
   setUnifiedTitleAndToolBarOnMac(true);
   resize(800, 600);
-
-  renderer = new MapRenderer(map);
 
   coordFormats << new UTMFormatter();
   coordFormats << new DMSFormatter();
@@ -213,7 +211,7 @@ void MainWindow::createActions()
   layerActionGroup->addAction(autoLayer);
 
   for (int i = 0; i < map->numLayers(); i++) {
-    QAction *a = new QAction(map->layer(i).label, this);
+    QAction *a = new QAction(map->layer(i).name, this);
     a->setData(QVariant(i));
     a->setCheckable(true);
     layerActionGroup->addAction(a);
@@ -424,7 +422,7 @@ void MainWindow::gridChanged(QAction *a)
 
 void MainWindow::newWindowTriggered()
 {
-  MainWindow *m = new MainWindow(map);
+  MainWindow *m = new MainWindow(map, renderer);
   m->show();
 }
 

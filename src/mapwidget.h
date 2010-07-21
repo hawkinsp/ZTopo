@@ -7,16 +7,18 @@
 #include <QPixmap>
 
 #include "map.h"
+#include "maprenderer.h"
 #include "projection.h"
 class QPaintEvent;
 class QGestureEvent;
 class QPinchGesture;
-class MapRenderer;
 
-class MapWidget : public QAbstractScrollArea {
+
+class MapWidget : public QAbstractScrollArea, public MapRendererClient {
   Q_OBJECT
 public:
   MapWidget(Map *m, MapRenderer *r, QWidget *parent = 0);
+  ~MapWidget();
 
 
   // Center on a point in map coordinates
@@ -46,7 +48,8 @@ public:
   QRect viewToMapRect(QRect v);
 
   // Visible area in map coordinates
-  QRect visibleArea();
+  virtual QRect visibleArea();
+  virtual int currentLayer(); // Current map layer
 
   // Layer choice
   void setLayer(int layer);
@@ -79,7 +82,6 @@ private:
   qreal scaleFactor;
   qreal scaleStep;
   qreal bumpedScale;
-  int currentLayer(); // Current map layer
 
   // Last mouse position observed in a mouse move event
   QPoint lastMousePos;

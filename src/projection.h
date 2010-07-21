@@ -13,6 +13,7 @@ enum Datum {
   numDatums = 2
 };
 const char *datumName(Datum d);
+Datum parseDatum(const QString &);
 
 class Projection {
 public:

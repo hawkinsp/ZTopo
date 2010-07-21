@@ -7,6 +7,7 @@
 #include <QSizeF>
 #include <QString>
 #include <QTransform>
+#include <QUrl>
 #include <QVector>
 
 #include "prefix.h"
@@ -45,19 +46,25 @@ class Layer
 {
  public:
   Layer() { }
-  Layer(QString n, QString l, int z) : name(n), label(l), maxLevel(z) { }
+  Layer(QString i, QString n, int z, int s);
 
-
-  QString name, label;
+  QString id, name;
   int maxLevel;
+  int scale;
 
   PrefixTree missingTiles;
+
+  static Layer fromVariant(const QVariant &v);
 };
 
 class Map {
 public:
-  Map(Datum d, Projection *pj, const QTransform &projToMap,
-      QSize mapSize);
+  Map(const QString &id, const QString &name, const QUrl &baseURL, Datum d, 
+      Projection *pj, const QRect &mapArea, QSizeF pixelSize, QVector<Layer> &layers);
+
+  static Map *fromVariant(const QVariant &);
+
+  const QString &id();
 
   // Conversions from map to projection space
   const QTransform &mapToProj() { return tMapToProj; }
@@ -112,7 +119,7 @@ public:
 
   int numLayers() { return layers.size(); }
   const Layer &layer(int id) { return layers[id]; }
-  bool layerByName(QString name, int &layer);
+  bool layerById(QString name, int &layer);
 
   Tile quadKeyToTile(int layer, QString quadKey);
   QString tileToQuadKey(Tile t);
@@ -120,10 +127,15 @@ public:
   unsigned int tileToQuadKeyInt(Tile t);
 private:
 
-  Datum dDatum;
+  QString sId, sName;
+  QUrl baseUrl;
 
+  Datum dDatum;
   // Projection of projection space
   Projection *pjProj;
+
+  QRect mapArea; // Map area in projection space
+  QSizeF pixelSize; // Size of map pixels in projection space
 
   // Transforms from projection space to map space and vice versa
   QTransform tProjToMap;

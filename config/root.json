@@ -1,0 +1,27 @@
+{
+  "maps": [
+    { 
+      "id": "topo-ca",
+      "name": "California",
+      "baseURL": "/Users/hawkinsp/geo/tiles",
+      "datum": "NAD83",
+      "projection": "+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +ellps=GRS80 +datum=NAD83 +units=m +no_defs",
+      "mapArea": { "x": -525000, "y": 545000, "w": 1200000, "h": 1200000 },
+      "pixelSize": {"w": 1.524, "h": 1.524 },
+      "layers": [
+	{
+	  "id": "100k",
+	  "name": "USGS 30'x60' Topographic Quads",
+	  "scale": 100000,
+	  "maxLevel": 9
+	},
+	{
+	  "id": "24k",
+	  "name": "USGS 7.5' Topographic Quads",
+	  "scale": 24000,
+	  "maxLevel": 12
+	}
+      ]
+    }
+  ]
+}

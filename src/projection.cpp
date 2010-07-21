@@ -9,8 +9,15 @@ const char *datumName(Datum d)
   switch (d) {
   case NAD27: return "NAD27";
   case NAD83: return "NAD83";
-  default: abort();
+  default: qFatal("Invalid map datum in datumName"); abort();
   }
+}
+
+Datum parseDatum(const QString &d)
+{
+  if (d == QString("NAD27")) return NAD27;
+  else if (d == QString("NAD83")) return NAD83;
+  else { qFatal("Unknown map datum in parseDatum"); abort(); }
 }
 
 Projection::Projection(const char *proj, qreal s)
@@ -62,14 +69,19 @@ QString Projection::toString(QPointF p) {
 }
 
 namespace Geographic {
-  static Projection pjNAD27("+proj=latlong +datum=NAD27", degreesPerRadian);
-  static Projection pjNAD83("+proj=latlong +datum=NAD83", degreesPerRadian);
+  static Projection *pjNAD27 = NULL, *pjNAD83 = NULL;
 
   Projection *getProjection(Datum d)
   {
     switch (d) {
-    case NAD27: return &pjNAD27;
-    case NAD83: return &pjNAD83;
+    case NAD27:
+      if (pjNAD27) return pjNAD27;
+      pjNAD27 = new Projection("+proj=latlong +datum=NAD27", degreesPerRadian);
+      return pjNAD27;
+    case NAD83: 
+      if (pjNAD83) return pjNAD83;
+      pjNAD83 = new Projection("+proj=latlong +datum=NAD83", degreesPerRadian);
+      return pjNAD83;
     default: return NULL;
     }
   }

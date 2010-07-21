@@ -3,31 +3,63 @@
 #include <QStringBuilder>
 #include <QStringRef>
 #include <QTextStream>
+#include <QVariant>
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <iostream>
 #include "consts.h"
 #include "map.h"
-#include "mapprojection.h"
 
 uint qHash(const Tile& k)
 {
   return qHash(k.x) ^ qHash(k.y) ^ qHash(k.level) ^ qHash(k.layer);
 }
 
-Map::Map(Datum d, Projection *pj, const QTransform &ptm, QSize mapSize)
-  : dDatum(d), pjProj(pj)
+
+
+Layer::Layer(QString i, QString n, int z, int s) 
+  : id(i), name(n), maxLevel(z), scale(s)
 {
+}
+
+static const QString layerIdField("id");
+static const QString layerNameField("name");
+static const QString layerMaxLevelField("maxLevel");
+static const QString layerScaleField("scale");
+Layer Layer::fromVariant(const QVariant &v)
+{
+  QVariantMap m(v.toMap());
+  if (!m.contains(layerIdField) || !m.contains(layerNameField) ||
+      !m.contains(layerMaxLevelField) || !m.contains(layerScaleField)) {
+    qFatal("Label::fromVariant - missing fields");
+  }
+    return Layer(m[layerIdField].toString(), 
+                 m[layerNameField].toString(), 
+                 m[layerMaxLevelField].toInt(),
+                 m[layerScaleField].toInt());
+
+}
+
+Map::Map(const QString &aId, const QString &aName, const QUrl &aBaseUrl, Datum d, 
+         Projection *pj, const QRect &aMapArea, QSizeF aPixelSize, 
+         QVector<Layer> &aLayers)
+  : sId(aId), sName(aName), baseUrl(aBaseUrl), dDatum(d), pjProj(pj), mapArea(aMapArea),
+    pixelSize(aPixelSize), layers(aLayers)
+{
+
+  tProjToMap = QTransform();
+  tProjToMap.scale(1.0 / pixelSize.width(), -1.0 / pixelSize.height());
+  tProjToMap.translate(-mapArea.left(), -mapArea.top());
+
   bool invertible;
-  tProjToMap = ptm;
-  tMapToProj = ptm.inverted(&invertible);
+  tMapToProj = tProjToMap.inverted(&invertible);
   assert(tProjToMap.type() <= QTransform::TxScale && invertible);
 
   QPointF projOrigin = mapToProj().map(QPointF(0.0, 0.0));
   printf("proj origin %f %f\n", projOrigin.x(), projOrigin.y());
 
-  QRectF projArea = QRectF(projOrigin, QSizeF(mapSize.width(), -mapSize.height())).normalized();
+  QRectF projArea = QRectF(projOrigin, QSizeF(mapArea.width(), -mapArea.height())).normalized();
   printf("proj area %f %f %f %f\n", projArea.left(), projArea.top(),
          projArea.right(), projArea.bottom());
   geoBounds = 
@@ -35,7 +67,7 @@ Map::Map(Datum d, Projection *pj, const QTransform &ptm, QSize mapSize)
     .boundingRect().normalized().toAlignedRect();
                                                           
 
-  reqSize = projToMap().mapRect(QRect(QPoint(0,0), mapSize)).size();
+  reqSize = projToMap().mapRect(QRect(QPoint(0,0), mapArea.size())).size();
 
   int size = std::max(reqSize.width(), reqSize.height());
   logSize = 0;
@@ -48,12 +80,50 @@ Map::Map(Datum d, Projection *pj, const QTransform &ptm, QSize mapSize)
   baseTileSz = 1 << logBaseTileSz;
   vMaxLevel = logSize - logBaseTileSz;
 
+}
 
 
-  layers.append(Layer("100k", "1:100k Quad", 9));
-  layers.append(Layer("24k", "1:24k Quad", 12));
-  //  layers.append(Layer("250k", 9, 1));
-  //layers.append(Layer("base", 8));
+
+QRect variantToQRect(const QVariant &v)
+{
+  QVariantMap m(v.toMap());
+  int x = m["x"].toInt();
+  int y = m["y"].toInt();
+  int w = m["w"].toInt();
+  int h = m["h"].toInt();
+  return QRect(x, y, w, h);
+}
+
+QSizeF variantToQSizeF(const QVariant &v)
+{
+  QVariantMap m(v.toMap());
+  qreal w = m["w"].toReal();
+  qreal h = m["h"].toReal();
+  return QSizeF(w, h);
+}
+
+Map *Map::fromVariant(const QVariant &v)
+{
+  QVariantMap m(v.toMap());
+  QString id(m["id"].toString());
+  QString name(m["name"].toString());
+  QUrl baseUrl(m["baseURL"].toString());
+  QString datumStr(m["datum"].toString());
+  Datum datum = parseDatum(datumStr);
+  Projection *pj = new Projection(m["projection"].toString());
+  QSizeF pixelSize(variantToQSizeF(m["pixelSize"]));
+  QRect mapArea(variantToQRect(m["mapArea"]));
+
+  QVector<Layer> layers;
+  foreach (QVariant v, m["layers"].toList()) {
+    layers << Layer::fromVariant(v);
+  }
+
+  return new Map(id, name, baseUrl, datum, pj, mapArea, pixelSize, layers);
+}
+
+const QString &Map::id() { 
+  return sId;
 }
 
 QRect Map::geographicBounds()
@@ -69,17 +139,18 @@ QSizeF Map::mapPixelSize()
 
 int Map::bestLayerAtLevel(int level)
 {
-  if (level > 9) return 1;
-  return 0;
-  //  if (level > 8) return 1;
-  //  return 2;
+  int i = 0;
+  while (i < layers.size() && level > layers[i].maxLevel)
+    i++;
+  
+  return (i >= layers.size()) ? layers.size() - 1 : i;
 }
 
 
-bool Map::layerByName(QString name, int &layer)
+bool Map::layerById(QString id, int &layer)
 {
   for (int i = 0; i < layers.size(); i++) {
-    if (layers[i].name == name) {
+    if (layers[i].id == id) {
       layer = i;
       return true;
     }
@@ -179,7 +250,7 @@ Tile Map::quadKeyToTile(int layer, QString quad)
 
 
 QString Map::missingTilesPath(int layer) {
-  return "tiles/" % layers[layer].name % "/missing.txtz";
+  return baseUrl.toString() % "/" % layers[layer].id % "/missing.txtz";
 }
 
 void Map::loadMissingTiles(int layer, QIODevice &d)
@@ -188,13 +259,13 @@ void Map::loadMissingTiles(int layer, QIODevice &d)
   QByteArray missingCompressed(d.readAll());
   d.close();
   if (missingCompressed.isEmpty()) {
-    fprintf(stderr, "Empty missing tile data for layer %s!\n", layers[layer].name.toLatin1().data());
+    qWarning("Empty missing tile data for layer %s!\n", layers[layer].id.toLatin1().data());
     return;
   }
 
   QByteArray mData(qUncompress(missingCompressed));
   if (mData.isEmpty()) {
-    fprintf(stderr, "Bad missing tile data for layer %s!\n", layers[layer].name.toLatin1().data());
+    qWarning("Bad missing tile data for layer %s!\n", layers[layer].id.toLatin1().data());
     return;
   }
   QTextStream mStream(mData);
@@ -210,7 +281,7 @@ void Map::loadMissingTiles(int layer, QIODevice &d)
 QString Map::tilePath(Tile t)
 {
   QString quadKey = tileToQuadKey(t);
-  QString path = "tiles/" % layers[t.layer].name % "/";
+  QString path = baseUrl.toString() % "/" % layers[t.layer].id % "/";
   for (int i = 0; i < t.level; i += tileDirectoryChunk) {
     QStringRef chunk(&quadKey, i, std::min(tileDirectoryChunk, t.level - i));
     if (i > 0) {

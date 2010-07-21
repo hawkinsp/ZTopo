@@ -15,7 +15,6 @@ class QLineEdit;
 class QRegExpValidator;
 
 class Map;
-class MapProjection;
 class MapRenderer;
 class MapWidget;
 
@@ -37,7 +36,7 @@ class MainWindow : public QMainWindow
   Q_OBJECT
 
 public:
-  MainWindow(Map *m, QWidget *parent = 0);
+  MainWindow(Map *m, MapRenderer *r, QWidget *parent = 0);
   ~MainWindow();
 
 protected:

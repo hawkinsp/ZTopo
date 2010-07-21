@@ -21,7 +21,7 @@
 #include <QString>
 #include "consts.h"
 #include "map.h"
-#include "mapprojection.h"
+#include "rootdata.h"
 
 #include <ogrsf_frmts.h>
 
@@ -213,23 +213,26 @@ void getQuadInfo(QFileInfo filename, Projection *pj, Quad &quad)
 
 int main(int argc, char **argv)
 {
-  if (argc < 2) {
-    fprintf(stderr, "import <file.tif>\n");
+  if (argc < 4) {
+    fprintf(stderr, "import <maps.json> <map id> <file.tif>\n");
     return -1;
   }
 
   OGRRegisterAll();
   GDALAllRegister();
 
-  QTransform tr;
+  QFile rootFile(argv[1]);
+  QString mapId(argv[2]);
+  QFileInfo filename(argv[3]);
+
+  QMap<QString, Map *> maps = readRootData(rootFile);
+  Map *map = maps[mapId];
 
   Projection *pjGeo = Geographic::getProjection(NAD27);
-  Projection *pj = new Projection(californiaMapProjection);
-  californiaProjToMapTransform(tr);
-
-  Map map(NAD27, pj, tr, californiaMapSize);
+  Projection *pj = map->projection();
 
 
+  readQuadIndex(0, "/Users/hawkinsp/geo/drg/index/drg100.shp", "drg100", pj);
   readQuadIndex(1, "/Users/hawkinsp/geo/drg/index/drg24.shp", "drg24", pj);
 
   // Index information seems buggy for these quads -- just use the regular grid.
@@ -237,7 +240,7 @@ int main(int argc, char **argv)
   quads.remove("o37122g5"); // Point Bonita
 
 
-  QFileInfo filename(argv[1]);
+
 
   GDALDataset *ds = (GDALDataset *)GDALOpen(filename.filePath().toLatin1().data(),
                                             GA_ReadOnly);
@@ -299,19 +302,19 @@ int main(int argc, char **argv)
   QRectF projRect = QRectF(fProjTopLeft, fProjSize);
 
   // Rectangle covered by the entire map image
-  QRectF mapRect = map.projToMap().mapRect(projRect);
+  QRectF mapRect = map->projToMap().mapRect(projRect);
 
   printf("Map Rect: %lf %lf %lf %lf\n", mapRect.left(), mapRect.top(),
          mapRect.right(), mapRect.bottom());
 
 
   // Compute the initial scale factor and tile level
-  QSizeF mapPixelSize = map.mapPixelSize();
+  QSizeF mapPixelSize = map->mapPixelSize();
   assert(mapPixelSize.width() + mapPixelSize.height() < epsilon);
 
   QSizeF scale(fPixelSize.width() / mapPixelSize.width(),
                fPixelSize.height() / mapPixelSize.height());
-  int maxLevel = map.maxLevel();
+  int maxLevel = map->maxLevel();
 
   while (scale.width() >= 1.1) {
     maxLevel--;
@@ -327,14 +330,14 @@ int main(int argc, char **argv)
 
   QPolygonF geoQuad = pjGeo->transformFrom(pj, projQuad);
   QRectF geoQuadBounds(geoQuad.boundingRect());
-  printf("Series: %d %s\n", quad.series, map.layer(quad.series).name.toLatin1().data());
+  printf("Series: %d %s\n", quad.series, map->layer(quad.series).name.toLatin1().data());
   printf("Geographic quad boundary: %lf %lf %lf %lf\n", geoQuadBounds.left(),
          geoQuadBounds.top(), geoQuadBounds.right(), geoQuadBounds.bottom());
 
 
   // Quad bounding rectangle in map space
   QRectF projQuadBounds = projQuad.boundingRect();
-  QRectF mapQuadBounds = map.projToMap().mapRect(projQuadBounds);
+  QRectF mapQuadBounds = map->projToMap().mapRect(projQuadBounds);
   printf("Quad bounding rectangle in map space: %lf %lf %lf %lf\n", 
          mapQuadBounds.left(), mapQuadBounds.top(),
          mapQuadBounds.right(), mapQuadBounds.bottom());
@@ -394,8 +397,8 @@ int main(int argc, char **argv)
                            p.y() * scale.height() / fPixelSize.height());
     }
 
-    QSizeF baseTileSize(map.baseTileSize(), map.baseTileSize());
-    int tileSize = map.tileSize(level);
+    QSizeF baseTileSize(map->baseTileSize(), map->baseTileSize());
+    int tileSize = map->tileSize(level);
 
     QRectF tileRectF = QRectF(mapQuadBounds.topLeft() / qreal(tileSize),
                               mapQuadBounds.bottomRight() / qreal(tileSize));
@@ -410,12 +413,12 @@ int main(int argc, char **argv)
 
         QPointF tileTopLeft(tileX * tileSize, tileY * tileSize);
         QPointF deltaTileTopLeft = tileTopLeft - mapRect.topLeft();
-        qreal s = qreal(1 << (map.maxLevel() - level));
+        qreal s = qreal(1 << (map->maxLevel() - level));
         QPointF topLeft(deltaTileTopLeft.x() / s,
                         deltaTileTopLeft.y() / s);
         QRectF src(topLeft, baseTileSize);
         
-        QFileInfo tilePath(map.tilePath(key));
+        QFileInfo tilePath(map->tilePath(key));
         dir.mkpath(tilePath.path());
         QImage image;
         if (tilePath.exists()) {
