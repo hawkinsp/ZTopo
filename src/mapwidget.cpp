@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <QDebug>
 #include <QPainter>
 #include <QPaintEvent>
 #include <QPinchGesture>
@@ -29,11 +30,11 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, QWidget *parent)
   gridEnabled = false;
   showRuler = true;
 
+  //setViewport(new QWidget());
+  setViewport(new QGLWidget(QGLFormat(QGL::SampleBuffers)));
 
-  connect(r, SIGNAL(tileUpdated(Tile)), this, SLOT(tileUpdated(Tile)));
+  connect(r, SIGNAL(tileUpdated(Tile)), viewport(), SLOT(update()));
 
-  setViewport(new QWidget());
- // setViewport(new QGLWidget(QGLFormat(QGL::SampleBuffers)));
   setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
@@ -79,11 +80,6 @@ void MapWidget::zoomChanged()
 
   emit(scaleChanged(scaleFactor * scaleStep));
   tilesChanged();
-}
-
-void MapWidget::tileUpdated(Tile)
-{
-  repaint();
 }
 
 bool MapWidget::event(QEvent *ev)
@@ -170,10 +166,10 @@ void MapWidget::pinchGestureEvent(QPinchGesture *g)
   QPoint pointAfterScale = viewToMap(g->startCenterPoint().toPoint());
   centerOn(screenCenter + pointBeforeScale - pointAfterScale);
 
-  repaint();
+  viewport()->update();
 }
 
-int MapWidget::currentLayer()
+int MapWidget::currentLayer() const
 {
   int level = map->zoomLevel(currentScale());
   int layer = selectedLayer < 0 ? map->bestLayerAtLevel(level) : selectedLayer;
@@ -242,28 +238,28 @@ void MapWidget::setScale(qreal scale)
   // NaN scale -> no changed
 
   zoomChanged();
-  repaint();
+  viewport()->update();
 }
 
 void MapWidget::setRulerVisible(bool v)
 {
   showRuler = v;
-  repaint();
+  viewport()->update();
 }
 
 
-QPoint MapWidget::center()
+QPoint MapWidget::center() const
 {
   return QPoint(horizontalScrollBar()->value(), verticalScrollBar()->value());
 }
 
 
-QPoint MapWidget::viewToMap(QPoint p)
+QPoint MapWidget::viewToMap(QPoint p) const
 {
   return viewTopLeft() + QPoint(p.x() / currentScale(), p.y() / currentScale());
 }
 
-QRect MapWidget::viewToMapRect(QRect r)
+QRect MapWidget::viewToMapRect(QRect r) const
 {
   return QRect(r.x() / currentScale(), r.y() / currentScale(), 
                r.width() / currentScale(), 
@@ -271,7 +267,7 @@ QRect MapWidget::viewToMapRect(QRect r)
 }
 
 // Visible area in map coordinates
-QRect MapWidget::visibleArea()
+QRect MapWidget::visibleArea() const
 {
   int mw = int(width() / currentScale());
   int mh = int(height() / currentScale());
@@ -280,7 +276,7 @@ QRect MapWidget::visibleArea()
   return QRect(center() - QPoint(mw / 2, mh / 2), QSize(mw, mh));
 }
 
-QPoint MapWidget::viewTopLeft()
+QPoint MapWidget::viewTopLeft() const
 {
   return visibleArea().topLeft();
 }
@@ -290,7 +286,7 @@ void MapWidget::setLayer(int l)
 {
   selectedLayer = l;
   tilesChanged();
-  repaint();
+  viewport()->update();
 }
 
 void MapWidget::showGrid(Datum d, bool utm, qreal interval)
@@ -299,11 +295,11 @@ void MapWidget::showGrid(Datum d, bool utm, qreal interval)
   gridDatum = d;
   gridUTM = utm;
   gridInterval = interval;
-  repaint();
+  viewport()->update();
 }
 
 void MapWidget::hideGrid()
 {
   gridEnabled = false;
-  repaint();
+  viewport()->update();
 }

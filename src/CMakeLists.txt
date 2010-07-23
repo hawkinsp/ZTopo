@@ -1,4 +1,5 @@
 set(QT_USE_OPENGL TRUE)
+set(QT_USE_NETWORK TRUE)
 include(${QT_USE_FILE})
 set(common_SRCS
   projection.cpp
@@ -6,19 +7,21 @@ set(common_SRCS
   map.cpp
   prefix.cpp 
 ) 
-set(topoviewer_SRCS
+set(ztopo_SRCS
   coordformatter.cpp 
   main.cpp
   mainwindow.cpp
   maprenderer.cpp
   mapwidget.cpp
+  tilecache.cpp
   ${common_SRCS})
-set(topoviewer_MOC_HDRS
+set(ztopo_MOC_HDRS
   mainwindow.h
   maprenderer.h
   mapwidget.h
+  tilecache.h
 )
-set(topoviewer_RCCS
+set(ztopo_RCCS
   images.qrc
 )  
 set(import_SRCS
@@ -28,15 +31,16 @@ set(merge_SRCS
   merge.cpp
   ${common_SRCS})
 
-include_directories(${QT_QTOPENGL_INCLUDE_DIR})
+QT4_ADD_RESOURCES(ztopo_RCC_SRCS ${ztopo_RCCS})
+QT4_WRAP_CPP(ztopo_MOC_SRCS ${ztopo_MOC_HDRS})
 
-QT4_ADD_RESOURCES(topoviewer_RCC_SRCS ${topoviewer_RCCS})
-QT4_WRAP_CPP(topoviewer_MOC_SRCS ${topoviewer_MOC_HDRS})
-
-add_executable(topoviewer MACOSX_BUNDLE ${topoviewer_SRCS} ${topoviewer_MOC_SRCS} ${topoviewer_RCC_SRCS})
+add_executable(ztopo MACOSX_BUNDLE ${ztopo_SRCS} ${ztopo_MOC_SRCS} ${ztopo_RCC_SRCS})
 add_executable(import ${import_SRCS})
 add_executable(merge ${merge_SRCS})
 
-target_link_libraries(topoviewer ${QT_LIBRARIES} qjson ${EXTRA_LIBS} ${QT_QTOPENGL_LIBRARIES} /opt/local/lib/libproj.a)
-target_link_libraries(import ${QT_LIBRARIES} proj gdal qjson)
+target_link_libraries(ztopo 
+  ${QT_LIBRARIES} qjson ${EXTRA_LIBS} ${QT_QTOPENGL_LIBRARIES}
+  ${QT_QTNETWORK_LIBRARIES}
+  /opt/local/lib/libproj.a ${Boost_Libraries} db_cxx)
+target_link_libraries(import ${QT_LIBRARIES} proj ${GDAL_LIBRARY} qjson)
 target_link_libraries(merge ${QT_LIBRARIES} proj qjson)

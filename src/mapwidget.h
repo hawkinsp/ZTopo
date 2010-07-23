@@ -25,7 +25,7 @@ public:
   void centerOn(QPoint p);
 
   // Set the current scale factor
-  qreal currentScale() { return bumpedScale; }
+  qreal currentScale() const { return bumpedScale; }
   void setScale(qreal scale);
 
   // Show/hide ruler
@@ -37,25 +37,22 @@ public:
 
 
   // Top left of the view in map coordinates
-  QPoint viewTopLeft();
+  QPoint viewTopLeft() const;
 
   // Center of the view in map coordinates
-  QPoint center();
+  QPoint center() const;
 
 
   // Convert view coordinates to map coordinates
-  QPoint viewToMap(QPoint v);
-  QRect viewToMapRect(QRect v);
+  QPoint viewToMap(QPoint v) const;
+  QRect viewToMapRect(QRect v) const;
 
   // Visible area in map coordinates
-  virtual QRect visibleArea();
-  virtual int currentLayer(); // Current map layer
+  virtual QRect visibleArea() const;
+  virtual int currentLayer() const; // Current map layer
 
   // Layer choice
   void setLayer(int layer);
-
-public slots:
-  void tileUpdated(Tile key);
 
 signals:
   void positionUpdated(QPoint pos);
@@ -106,8 +103,8 @@ private:
   void updateScrollBars();
   void zoomChanged();
 
-  int zoomLevel();
-  int maxLevel() { return map->maxLevel(); }
+  int zoomLevel() const;
+  int maxLevel() const { return map->maxLevel(); }
 };
 
 #endif

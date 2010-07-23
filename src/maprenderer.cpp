@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+
 #include <QApplication>
+#include <QDebug>
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QPixmapCache>
@@ -16,57 +18,14 @@
 #include <iostream>
 #include <cstdio>
 
-static const int numWorkerThreads = 2;
 
 static const int zoneBoundaryPoints = 10;
 static const int maxGridLines = 100;
 
 static const int pruneTimeout = 1000;
 
-struct TileEntry {
-  TileEntry() { }
-
-  QPixmap pixmap;
-};
-
-
-MapTileIOThread::MapTileIOThread(MapRenderer *v, QObject *parent)
-  : QThread(parent), view(v)
-{
-
-}
-
-void MapTileIOThread::run()
-{
-  qint64 bytesRead = 0;
-  forever {
-    view->tileQueueMutex.lock();
-    view->bytesRead += bytesRead;
-    while (view->tileQueue.isEmpty()) {
-      view->tileQueueCond.wait(&view->tileQueueMutex);
-    }
-    QPair<Tile, QString> pair = view->tileQueue.dequeue();
-    view->tileQueueMutex.unlock();
-
-    Tile key = pair.first;
-    QString filename = pair.second;
-    QFileInfo info(filename);
-    bytesRead = info.size();
-
-    QImage img;
-    if (img.load(filename)) {
-      QImage imgRgb = img.convertToFormat(QImage::Format_RGB32);
-      emit(tileLoaded(key, filename, imgRgb));
-    } else {
-      emit(tileLoaded(key, filename, img));
-    }
-    
-  }
-}
-
-
 MapRenderer::MapRenderer(Map *m, QObject *parent)
-  : QObject(parent), map(m)
+  : QObject(parent), map(m), tileCache(m)
 {
   for (int d = 0; d < numDatums; d++) {
     for (int z = 0; z < UTM::numZones; z++) {
@@ -74,17 +33,13 @@ MapRenderer::MapRenderer(Map *m, QObject *parent)
     }
   }
 
-  bytesRead = 0;
-  for (int i = 0; i < numWorkerThreads; i++) {
-    MapTileIOThread *ioThread = new MapTileIOThread(this, this);
-    ioThreads << ioThread;
-    connect(ioThread, SIGNAL(tileLoaded(Tile, QString, QImage)),
-            this, SLOT(tileLoaded(Tile, QString, QImage)));
-    ioThread->start();
-  }
-
   pruneTimer.setSingleShot(true);
   connect(&pruneTimer, SIGNAL(timeout()), this, SLOT(pruneTiles()));
+  connect(&tileCache, SIGNAL(tileLoaded(Tile)), this, SLOT(tileLoaded(Tile)));
+}
+
+void MapRenderer::tileLoaded(Tile key) {
+  emit(tileUpdated(key));
 }
 
 void MapRenderer::addClient(MapRendererClient *c) {
@@ -96,24 +51,6 @@ void MapRenderer::removeClient(MapRendererClient *c) {
   if (!pruneTimer.isActive()) { pruneTimer.start(pruneTimeout); }
 }
 
-
-
-void MapRenderer::tileLoaded(Tile key, QString filename, QImage img)
-{
-  if (!img.isNull()) {
-    QPixmap p = QPixmap::fromImage(img);
-    //    QPixmapCache::insert(filename, p);
-
-    //  printf("%lld bytes read\n", bytesRead);
-
-    // Check to see that the tile should still be displayed; it may have already been
-    // pruned
-    if (tileMap.contains(key)) {
-      tileMap[key]->pixmap = p;
-    }
-    emit(tileUpdated(key));
-  }
-}
 
 void MapRenderer::bumpScale(int layer, qreal scale, qreal &bumpedScale,
                             int &bumpedTileSize)
@@ -127,14 +64,15 @@ void MapRenderer::bumpScale(int layer, qreal scale, qreal &bumpedScale,
 void MapRenderer::drawTile(Tile key, QPainter &p, const QRect &dstRect)
 {
   int logTileSize = map->logBaseTileSize();
+  QPixmap pixmap;
 
   // Look in the current level. If found, we're done and we need not draw
   // anything else
   for (int layer = key.layer; layer >= 0; layer--) {
     Tile t(key.x, key.y, key.level, layer);
-    if (tileMap.contains(t) && !tileMap[t]->pixmap.isNull()) {
-      p.drawPixmap(dstRect, tileMap[t]->pixmap, 
-                   QRect(0, 0, 1 << logTileSize, 1 << logTileSize));
+
+    if (tileCache.getTile(key, pixmap)) {
+      p.drawPixmap(dstRect, pixmap, QRect(0, 0, 1 << logTileSize, 1 << logTileSize));
       return;
     }
   }
@@ -146,14 +84,14 @@ void MapRenderer::drawTile(Tile key, QPainter &p, const QRect &dstRect)
     for (int layer = key.layer; !doneAbove && layer >= 0; layer--) {
       Tile t(key.x >> deltaLevel, key.y >> deltaLevel, level, layer);
 
-      if (tileMap.contains(t) && !tileMap[t]->pixmap.isNull()) {
+      if (tileCache.getTile(t, pixmap)) {
         // Size of the destination tile in the source space
         int logSubSize = logTileSize - deltaLevel;
         int mask = (1 << deltaLevel) - 1;
         int subX = (key.x & mask) << logSubSize;
         int subY = (key.y & mask) << logSubSize;
         int size = 1 << logSubSize;
-        p.drawPixmap(dstRect, tileMap[t]->pixmap, QRect(subX, subY, size, size));
+        p.drawPixmap(dstRect, pixmap, QRect(subX, subY, size, size));
         doneAbove = true;
       }
     }
@@ -167,15 +105,15 @@ void MapRenderer::drawTile(Tile key, QPainter &p, const QRect &dstRect)
   for (int x = 0; x < deltaSize; x++) {
     for (int y = 0; y < deltaSize; y++) {
       bool found = false;
-      for (int layer = map->numLayers(); !found && layer >= 0; layer--) {
+      for (int layer = map->numLayers() - 1; !found && layer >= 0; layer--) {
         Tile t((key.x << deltaLevel) + x, (key.y << deltaLevel) + y, level, layer);
-        if (tileMap.contains(t) && !tileMap[t]->pixmap.isNull()) {
+        if (tileCache.getTile(t, pixmap)) {
           // Size of the source tile in the destination space
           qreal dstSizeX = qreal(dstRect.width()) / qreal(1 << deltaLevel);
           qreal dstSizeY = qreal(dstRect.height()) / qreal(1 << deltaLevel);
           QRectF dstSubRect(dstRect.left() + dstSizeX * x, 
                             dstRect.top() + dstSizeY * y, dstSizeX, dstSizeY);
-          p.drawPixmap(dstSubRect, tileMap[t]->pixmap, 
+          p.drawPixmap(dstSubRect, pixmap, 
                         QRectF(0, 0, 1 << logTileSize, 1 << logTileSize));
           found = true;
         }
@@ -222,28 +160,14 @@ void MapRenderer::render(QPainter &p, int layer, QRect mr, qreal scale)
   p.restore();
 }
 
+// Add tiles that are no longer visible to the LRU list
 void MapRenderer::pruneTiles()
 {
-  QMutableMapIterator<Tile, TileEntry *> i(tileMap);
-  while (i.hasNext()) {
-    i.next();
-    Tile t = i.key();
-    QRect r = map->tileToMapRect(t);
-
-    bool inUse = false;
-    QListIterator<MapRendererClient *> c(clients);
-    while (c.hasNext()) {
-      MapRendererClient *client = c.next();
-      if (t.layer == client->currentLayer() && r.intersects(client->visibleArea())) {
-        inUse = true;
-      }
-    }
-    if (!inUse) {
-      TileEntry *e = i.value();
-      delete e;
-      i.remove();
-    }
+  QList<QRect> rects;
+  foreach (MapRendererClient * const & client, clients) {
+    rects << client->visibleArea();
   }
+  tileCache.pruneTiles(rects);
 }
 
 void MapRenderer::loadTiles(int layer, QRect vis, qreal scale, bool wait)
@@ -255,22 +179,7 @@ void MapRenderer::loadTiles(int layer, QRect vis, qreal scale, bool wait)
   for (int x = newVisibleTiles.left(); x <= newVisibleTiles.right(); x++) {
     for (int y = newVisibleTiles.top(); y <= newVisibleTiles.bottom(); y++) {
       Tile key(x, y, level, layer);
-      if (!tileMap.contains(key)) {
-        QString filename = map->tilePath(key);
-        TileEntry *e = new TileEntry;
-        if ( //!QPixmapCache::find(filename, &e->pixmap) && 
-            !map->layer(layer).missingTiles.containsPrefix(map->tileToQuadKeyInt(key))) {
-          // Queue the tile for reading
-          
-          int size = 0;
-          tileQueueMutex.lock();
-          tileQueue.enqueue(QPair<Tile, QString>(key, filename));
-          size = tileQueue.size();
-          tileQueueCond.wakeOne();
-          tileQueueMutex.unlock();
-        }
-        tileMap[key] = e;
-      }
+      tileCache.requestTile(key);
     }
   }
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-BUNDLE=topoviewer.app
+BUNDLE=ztopo.app
 RESOURCES="$BUNDLE/Contents/Resources"
 FRAMEWORKS="$BUNDLE/Contents/Frameworks"
 mkdir -p $RESOURCES $FRAMEWORKS $RESOURCES/proj4

@@ -1,45 +1,27 @@
 #ifndef MAPRENDERER_H
 #define MAPRENDERER_H 1
 
+
 #include <QImage>
 #include <QList>
 #include <QMap>
-#include <QMutex>
 #include <QPainter>
 #include <QPair>
-#include <QPixmap>
-#include <QQueue>
-#include <QThread>
 #include <QTimer>
-#include <QWaitCondition>
 #include "map.h"
 #include "projection.h"
+#include "tilecache.h"
 class MapRenderer;
 class QPainterPath;
-class TileEntry;
 
-class MapTileIOThread : public QThread {
-  Q_OBJECT;
-
-public:
-  MapTileIOThread(MapRenderer *s, QObject *parent = 0);
-
-protected:
-  void run();
-
-private:
-  MapRenderer *view;
-
-signals:
-  void tileLoaded(Tile tile, QString filename, QImage img);
-};
 
 class MapRendererClient {
  public:
-  virtual int currentLayer() = 0;
-  virtual QRect visibleArea() = 0;
+  virtual int currentLayer() const = 0;
+  virtual QRect visibleArea() const = 0;
 };
 
+// Abstract base class for clients of a MapRenderer
 class MapRenderer : public QObject {
   Q_OBJECT
 public:
@@ -67,25 +49,19 @@ public:
                      qreal interval);
 
 
-  // Public for thread class
-  qint64 bytesRead;
-  QMutex tileQueueMutex;
-  QWaitCondition tileQueueCond;
-  QQueue<QPair<Tile, QString> > tileQueue;
-
 signals:
   void tileUpdated(Tile key);
-
-public slots:
-  void tileLoaded(Tile key, QString filename, QImage img);
 
 private slots:
   // Prune tiles not needed by any client
   void pruneTiles();
+  void tileLoaded(Tile key);
 
 private:
   QTimer pruneTimer;
 
+  // We keep a list of clients of the renderer, which we interrogate when pruning to
+  // see which tiles they still want us to keep around.
   QList<MapRendererClient *> clients;
   
   // UTM Zone boundaries in projection coordinates
@@ -93,13 +69,9 @@ private:
 
   QPainterPath *getUTMZoneBoundary(Datum d, int zone);
 
-  QVector<MapTileIOThread *> ioThreads;
-
   Map *map;
 
-  // All currently loaded tiles.
-  // Tiles are present but have value NULL if they are queued to be loaded from disk.
-  QMap<Tile, TileEntry *> tileMap;
+  TileCache tileCache;
 
   //  void findTile(Tile key, QPixmap &p, QRect &r);
   void drawTile(Tile key, QPainter &p, const QRect &r);

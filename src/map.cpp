@@ -44,7 +44,7 @@ Layer Layer::fromVariant(const QVariant &v)
 Map::Map(const QString &aId, const QString &aName, const QUrl &aBaseUrl, Datum d, 
          Projection *pj, const QRect &aMapArea, QSizeF aPixelSize, 
          QVector<Layer> &aLayers)
-  : sId(aId), sName(aName), baseUrl(aBaseUrl), dDatum(d), pjProj(pj), mapArea(aMapArea),
+  : sId(aId), sName(aName), fBaseUrl(aBaseUrl), dDatum(d), pjProj(pj), mapArea(aMapArea),
     pixelSize(aPixelSize), layers(aLayers)
 {
 
@@ -122,22 +122,22 @@ Map *Map::fromVariant(const QVariant &v)
   return new Map(id, name, baseUrl, datum, pj, mapArea, pixelSize, layers);
 }
 
-const QString &Map::id() { 
+const QString &Map::id() const { 
   return sId;
 }
 
-QRect Map::geographicBounds()
+QRect Map::geographicBounds() const
 {
   return geoBounds;
 }
 
-QSizeF Map::mapPixelSize()
+QSizeF Map::mapPixelSize() const
 {
   QSizeF s = mapToProj().mapRect(QRectF(0, 0, 1, 1)).size();
   return QSizeF(s.width(), -s.height());
 }
 
-int Map::bestLayerAtLevel(int level)
+int Map::bestLayerAtLevel(int level) const
 {
   int i = 0;
   while (i < layers.size() && level > layers[i].maxLevel)
@@ -147,7 +147,7 @@ int Map::bestLayerAtLevel(int level)
 }
 
 
-bool Map::layerById(QString id, int &layer)
+bool Map::layerById(QString id, int &layer) const
 {
   for (int i = 0; i < layers.size(); i++) {
     if (layers[i].id == id) {
@@ -158,33 +158,33 @@ bool Map::layerById(QString id, int &layer)
   return false;
 }
 
-QPoint Map::mapToTile(QPoint m, int level)
+QPoint Map::mapToTile(QPoint m, int level) const
 {
   int logSize = logTileSize(level);
   return QPoint(m.x() >> logSize, m.y() >> logSize);
 }
 
-int Map::baseTileSize()
+int Map::baseTileSize() const
 {
   return 1 << logBaseTileSz;
 }
 
-int Map::logBaseTileSize()
+int Map::logBaseTileSize() const
 {
   return logBaseTileSz;
 }
 
-int Map::logTileSize(int level) 
+int Map::logTileSize(int level) const
 {
   return logBaseTileSz + (vMaxLevel - level);
 }
 
-int Map::tileSize(int level)
+int Map::tileSize(int level) const
 {
   return 1 << logTileSize(level);
 }
 
-QString Map::tileToQuadKey(Tile tile)
+QString Map::tileToQuadKey(Tile tile) const
 {
   QString quad;
   int x = tile.x, y = tile.y;
@@ -202,7 +202,7 @@ QString Map::tileToQuadKey(Tile tile)
   return quad;
 }
 
-unsigned int Map::tileToQuadKeyInt(Tile tile)
+unsigned int Map::tileToQuadKeyInt(Tile tile) const
 {
   unsigned int quad = 1;
   int x = tile.x, y = tile.y;
@@ -219,7 +219,7 @@ unsigned int Map::tileToQuadKeyInt(Tile tile)
   return quad;
 }
 
-unsigned int Map::quadKeyToQuadKeyInt(QString quad)
+unsigned int Map::quadKeyToQuadKeyInt(QString quad) const
 {
   unsigned int q = 1;
   for (int i = quad.length() - 1; i >= 0; i--) {
@@ -230,7 +230,7 @@ unsigned int Map::quadKeyToQuadKeyInt(QString quad)
   return q;
 }
 
-Tile Map::quadKeyToTile(int layer, QString quad)
+Tile Map::quadKeyToTile(int layer, QString quad) const
 {
   int x = 0, y = 0, level = quad.length();
   for (int i = level; i > 0; i--) {
@@ -248,9 +248,24 @@ Tile Map::quadKeyToTile(int layer, QString quad)
   return Tile(x, y, level, layer);
 }
 
+Tile Map::quadKeyIntToTile(int layer, unsigned int q) const
+{
+  int x = 0, y = 0, level = 0;
+  while (q > 1) {
+    x <<= 1;
+    y <<= 1;
+    x |= q & 1;
+    y |= (q & 2) >> 1;
+    level++;
+    q >>= 2;
+   }
+  return Tile(x, y, level, layer);
+}
 
-QString Map::missingTilesPath(int layer) {
-  return baseUrl.toString() % "/" % layers[layer].id % "/missing.txtz";
+
+
+QString Map::missingTilesPath(int layer) const {
+  return layers[layer].id % "/missing.txtz";
 }
 
 void Map::loadMissingTiles(int layer, QIODevice &d)
@@ -278,10 +293,10 @@ void Map::loadMissingTiles(int layer, QIODevice &d)
   }
 }
 
-QString Map::tilePath(Tile t)
+QString Map::tilePath(Tile t) const
 {
   QString quadKey = tileToQuadKey(t);
-  QString path = baseUrl.toString() % "/" % layers[t.layer].id % "/";
+  QString path = layers[t.layer].id % "/";
   for (int i = 0; i < t.level; i += tileDirectoryChunk) {
     QStringRef chunk(&quadKey, i, std::min(tileDirectoryChunk, t.level - i));
     if (i > 0) {
@@ -293,7 +308,7 @@ QString Map::tilePath(Tile t)
   return path % "t.png";
 }
 
-QRect Map::mapRectToTileRect(QRect r, int level)
+QRect Map::mapRectToTileRect(QRect r, int level) const
 {
   int logSize = logTileSize(level);
   int minTileX = std::max(0, r.left() >> logSize);
@@ -304,14 +319,14 @@ QRect Map::mapRectToTileRect(QRect r, int level)
   return QRect(minTileX, minTileY, maxTileX - minTileX, maxTileY - minTileY);
 }
 
-QRect Map::tileToMapRect(Tile t)
+QRect Map::tileToMapRect(Tile t) const
 {
   int logSize = logTileSize(t.level);
   int size = 1 << logSize;
   return QRect(t.x << logSize, t.y << logSize, size, size);
 }
 
-QRect Map::rectAtLevel(QRect r, int fromLevel, int toLevel)
+QRect Map::rectAtLevel(QRect r, int fromLevel, int toLevel) const
 {
   if (toLevel < fromLevel) {
     int shift = fromLevel - toLevel;
@@ -335,7 +350,7 @@ QRect Map::rectAtLevel(QRect r, int fromLevel, int toLevel)
   }
 }
 
-int Map::zoomLevel(qreal scaleFactor)
+int Map::zoomLevel(qreal scaleFactor) const
 {
   qreal scale = std::max(std::min(scaleFactor, 1.0), epsilon);
   qreal r = maxLevel() + log2(scale);
