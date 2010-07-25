@@ -1,14 +1,35 @@
+/*
+  ZTopo --- a viewer for topographic maps
+  Copyright (C) 2010 Peter Hawkins
+  
+  This program is free software; you can redistribute it and/or
+  modify it under the terms of the GNU General Public License
+  as published by the Free Software Foundation; either version 2
+  of the License, or (at your option) any later version.
+  
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+  
+  You should have received a copy of the GNU General Public License
+  along with this program; if not, write to the Free Software
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+*/
+
 #include <QApplication>
+#include <QDebug>
+#include <QDesktopServices>
 #include <QMetaType>
-#include <QPixmapCache>
+#include <QSettings>
 #include <QStringBuilder>
-#include <QTransform>
 #include "mainwindow.h"
 #include "map.h"
 #include "maprenderer.h"
 #include "projection.h"
 #include "rootdata.h"
 #include "proj_api.h"
+#include "tilecache.h"
 
 #include <QFile>
 #include <QUrl>
@@ -19,9 +40,12 @@
 
 int main(int argc, char **argv)
 {
+  qRegisterMetaType<Cache::Key>("Key");
   qRegisterMetaType<Tile>("Tile");
-  QCoreApplication::setOrganizationName("Racing Snail Software");
-  QCoreApplication::setApplicationName("Topograhic Map Viewer");
+  qRegisterMetaType<qkey>("qkey");
+
+  QCoreApplication::setOrganizationName("ZTopo");
+  QCoreApplication::setApplicationName("ZTopo");
 
   QApplication app(argc, argv);
 
@@ -57,14 +81,14 @@ int main(int argc, char **argv)
   }
   Map *map = maps.values()[0];
 
-  for (int layer = 0; layer < map->numLayers(); layer++) {
-    QFile missing(map->missingTilesPath(layer));
-    map->loadMissingTiles(layer, missing);
-  }
+  QSettings settings;
+  QString cachePath = settings.value("cachePath", 
+                      QDesktopServices::storageLocation(QDesktopServices::CacheLocation)).toString();
+  QDir::current().mkpath(cachePath);
 
-  MapRenderer renderer(map);
+  MapRenderer renderer(map, cachePath);
   MainWindow *window = new MainWindow(map, &renderer);
-  QPixmapCache::setCacheLimit(50000);
+  //  QPixmapCache::setCacheLimit(50000);
 
   window->show();
   return app.exec();

@@ -1,3 +1,22 @@
+/*
+  ZTopo --- a viewer for topographic maps
+  Copyright (C) 2010 Peter Hawkins
+  
+  This program is free software; you can redistribute it and/or
+  modify it under the terms of the GNU General Public License
+  as published by the Free Software Foundation; either version 2
+  of the License, or (at your option) any later version.
+  
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+  
+  You should have received a copy of the GNU General Public License
+  along with this program; if not, write to the Free Software
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+*/
+
 #ifndef MAP_H
 #define MAP_H 1
 
@@ -10,17 +29,36 @@
 #include <QUrl>
 #include <QVector>
 
-#include "prefix.h"
 #include "projection.h"
 
 static const int tileDirectoryChunk = 3;
+
+int log2_int(int x);
+
+
+// x, y, level, layer tuple packed as an integer
+// Layout:
+// 00LL001YXYXYXYX
+typedef u_int32_t qkey;
+
+void quadKeyUnpack(int maxLevel, qkey key, qkey &q, int &layer);
+qkey quadKeyPack(int maxLevel, qkey q, int layer);
 
 // Tile coordinates
 class Tile {
 public:
   Tile() {}
- Tile(int vx, int vy, int vlevel, int vlayer) 
-   : x(vx), y(vy), level(vlevel), layer(vlayer) { } 
+  Tile(qkey q, int maxLevel);
+  Tile(int layer, const QString &);
+  Tile(int vx, int vy, int vlevel, int vlayer);
+
+  // Convert a tile to a quad key; requires the maximum zoom level of the map
+  qkey toQuadKey(int maxLayer) const;
+
+  // Convert a tile to a quad key specific for a map layer
+  qkey toLayerQuadKey() const;
+  
+  QString toQuadKeyString() const; // Return tile as a quad key string, no layer
 
   int x;
   int y;
@@ -46,15 +84,20 @@ class Layer
 {
  public:
   Layer() { }
+  Layer(const QVariant &v);
   Layer(QString i, QString n, int z, int s);
 
-  QString id, name;
-  int maxLevel;
-  int scale;
+  const QString &id() const { return fId; }
+  const QString &name() const { return fName; }
+  const int maxLevel() const { return fMaxLevel; }
+  const int indexLevelStep() const { return fLevelStep; }
+  const int scale() const { return fScale; }
 
-  PrefixTree missingTiles;
-
-  static Layer fromVariant(const QVariant &v);
+ private:
+  QString fId, fName; // Short and descriptive names
+  int fMaxLevel;  // Maximum tile zoom level 
+  int fLevelStep;  // Maximum tile zoom level 
+  int fScale;     // Map scale, e.g. 1:24000
 };
 
 class Map {
@@ -95,11 +138,13 @@ public:
 
   // Filename of a given tile
   QString tilePath(Tile t) const;
+  QString indexFile(qkey q) const;
 
   // Filename of the missing tiles file
-  QString missingTilesPath(int layer) const;
-  void loadMissingTiles(int layer, QIODevice &d);
+  //  QString missingTilesPath(int layer) const;
+  // void loadMissingTiles(int layer, QIODevice &d);
 
+  int minLevel() const { return 1; }
   int maxLevel() const { return vMaxLevel; }
 
   // Given a rectangle in map coordinates, produce the smallest rectangle of tiles 
@@ -123,11 +168,11 @@ public:
   const Layer &layer(int id) const { return layers[id]; }
   bool layerById(QString name, int &layer) const;
 
-  Tile quadKeyToTile(int layer, QString quadKey) const;
-  QString tileToQuadKey(Tile t) const;
-  unsigned int quadKeyToQuadKeyInt(QString quadKey) const;
-  unsigned int tileToQuadKeyInt(Tile t) const;
-  Tile quadKeyIntToTile(int layer, unsigned int q) const;
+  //  Tile quadKeyToTile(int layer, QString quadKey) const;
+  //  QString tileToQuadKey(Tile t) const;
+  //  qkey quadKeyToQuadKeyInt(QString quadKey) const;
+  //  qkey tileToQuadKeyInt(Tile t) const;
+  //  Tile quadKeyIntToTile(int layer, unsigned int q) const;
 private:
 
   QString sId, sName;

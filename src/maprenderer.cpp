@@ -1,3 +1,22 @@
+/*
+  ZTopo --- a viewer for topographic maps
+  Copyright (C) 2010 Peter Hawkins
+  
+  This program is free software; you can redistribute it and/or
+  modify it under the terms of the GNU General Public License
+  as published by the Free Software Foundation; either version 2
+  of the License, or (at your option) any later version.
+  
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+  
+  You should have received a copy of the GNU General Public License
+  along with this program; if not, write to the Free Software
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+*/
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -24,8 +43,8 @@ static const int maxGridLines = 100;
 
 static const int pruneTimeout = 1000;
 
-MapRenderer::MapRenderer(Map *m, QObject *parent)
-  : QObject(parent), map(m), tileCache(m)
+MapRenderer::MapRenderer(Map *m, const QString &cachePath, QObject *parent)
+  : QObject(parent), map(m), tileCache(m, cachePath)
 {
   for (int d = 0; d < numDatums; d++) {
     for (int z = 0; z < UTM::numZones; z++) {
@@ -35,11 +54,11 @@ MapRenderer::MapRenderer(Map *m, QObject *parent)
 
   pruneTimer.setSingleShot(true);
   connect(&pruneTimer, SIGNAL(timeout()), this, SLOT(pruneTiles()));
-  connect(&tileCache, SIGNAL(tileLoaded(Tile)), this, SLOT(tileLoaded(Tile)));
+  connect(&tileCache, SIGNAL(tileLoaded()), this, SLOT(tileLoaded()));
 }
 
-void MapRenderer::tileLoaded(Tile key) {
-  emit(tileUpdated(key));
+void MapRenderer::tileLoaded() {
+  emit(tileUpdated());
 }
 
 void MapRenderer::addClient(MapRendererClient *c) {
@@ -55,7 +74,7 @@ void MapRenderer::removeClient(MapRendererClient *c) {
 void MapRenderer::bumpScale(int layer, qreal scale, qreal &bumpedScale,
                             int &bumpedTileSize)
 {
-  int level = std::min(map->zoomLevel(scale), map->layer(layer).maxLevel);
+  int level = std::min(map->zoomLevel(scale), map->layer(layer).maxLevel());
   int tileSize = map->tileSize(level);
   bumpedTileSize = int(tileSize * scale);
   bumpedScale = float(bumpedTileSize) / float(tileSize);
@@ -79,7 +98,7 @@ void MapRenderer::drawTile(Tile key, QPainter &p, const QRect &dstRect)
 
   // Look at all levels above us
   bool doneAbove = false;
-  for (int level = key.level - 1; !doneAbove && level >= 0; level--) {
+  for (int level = key.level - 1; !doneAbove && level >= map->minLevel(); level--) {
     int deltaLevel = key.level - level;
     for (int layer = key.layer; !doneAbove && layer >= 0; layer--) {
       Tile t(key.x >> deltaLevel, key.y >> deltaLevel, level, layer);
@@ -100,22 +119,24 @@ void MapRenderer::drawTile(Tile key, QPainter &p, const QRect &dstRect)
   // Look one level below us. Overdraw whatever we can find on whatever we already
   // drew.
   int level = key.level + 1;
-  int deltaLevel = 1;
-  int deltaSize = 1 << deltaLevel;
-  for (int x = 0; x < deltaSize; x++) {
-    for (int y = 0; y < deltaSize; y++) {
-      bool found = false;
-      for (int layer = map->numLayers() - 1; !found && layer >= 0; layer--) {
-        Tile t((key.x << deltaLevel) + x, (key.y << deltaLevel) + y, level, layer);
-        if (tileCache.getTile(t, pixmap)) {
-          // Size of the source tile in the destination space
-          qreal dstSizeX = qreal(dstRect.width()) / qreal(1 << deltaLevel);
-          qreal dstSizeY = qreal(dstRect.height()) / qreal(1 << deltaLevel);
-          QRectF dstSubRect(dstRect.left() + dstSizeX * x, 
-                            dstRect.top() + dstSizeY * y, dstSizeX, dstSizeY);
-          p.drawPixmap(dstSubRect, pixmap, 
-                        QRectF(0, 0, 1 << logTileSize, 1 << logTileSize));
-          found = true;
+  if (level <= map->maxLevel()) {
+    int deltaLevel = 1;
+    int deltaSize = 1 << deltaLevel;
+    for (int x = 0; x < deltaSize; x++) {
+      for (int y = 0; y < deltaSize; y++) {
+        bool found = false;
+        for (int layer = map->numLayers() - 1; !found && layer >= 0; layer--) {
+          Tile t((key.x << deltaLevel) + x, (key.y << deltaLevel) + y, level, layer);
+          if (tileCache.getTile(t, pixmap)) {
+            // Size of the source tile in the destination space
+            qreal dstSizeX = qreal(dstRect.width()) / qreal(1 << deltaLevel);
+            qreal dstSizeY = qreal(dstRect.height()) / qreal(1 << deltaLevel);
+            QRectF dstSubRect(dstRect.left() + dstSizeX * x, 
+                              dstRect.top() + dstSizeY * y, dstSizeX, dstSizeY);
+            p.drawPixmap(dstSubRect, pixmap, 
+                         QRectF(0, 0, 1 << logTileSize, 1 << logTileSize));
+            found = true;
+          }
         }
       }
     }
@@ -126,7 +147,7 @@ void MapRenderer::drawTile(Tile key, QPainter &p, const QRect &dstRect)
 
 void MapRenderer::render(QPainter &p, int layer, QRect mr, qreal scale)
 {
-  int level = std::min(map->zoomLevel(scale), map->layer(layer).maxLevel);
+  int level = std::min(map->zoomLevel(scale), map->layer(layer).maxLevel());
   int bumpedTileSize;
   qreal bumpedScale;
   bumpScale(layer, scale, bumpedScale, bumpedTileSize);
@@ -167,19 +188,20 @@ void MapRenderer::pruneTiles()
   foreach (MapRendererClient * const & client, clients) {
     rects << client->visibleArea();
   }
-  tileCache.pruneTiles(rects);
+  tileCache.pruneObjects(rects);
 }
 
 void MapRenderer::loadTiles(int layer, QRect vis, qreal scale, bool wait)
 {
-  int level = std::min(map->zoomLevel(scale), map->layer(layer).maxLevel);
+  int level = std::min(map->zoomLevel(scale), map->layer(layer).maxLevel());
 
   QRect newVisibleTiles = map->mapRectToTileRect(vis, level);
 
+  QList<Tile> tiles;
   for (int x = newVisibleTiles.left(); x <= newVisibleTiles.right(); x++) {
     for (int y = newVisibleTiles.top(); y <= newVisibleTiles.bottom(); y++) {
-      Tile key(x, y, level, layer);
-      tileCache.requestTile(key);
+      tiles << Tile(x, y, level, layer);
+      tileCache.requestTiles(tiles);
     }
   }
 

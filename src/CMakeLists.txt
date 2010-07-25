@@ -5,7 +5,6 @@ set(common_SRCS
   projection.cpp
   rootdata.cpp
   map.cpp
-  prefix.cpp 
 ) 
 set(ztopo_SRCS
   coordformatter.cpp 

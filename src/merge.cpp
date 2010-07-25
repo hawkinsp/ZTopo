@@ -1,3 +1,22 @@
+/*
+  ZTopo --- a viewer for topographic maps
+  Copyright (C) 2010 Peter Hawkins
+  
+  This program is free software; you can redistribute it and/or
+  modify it under the terms of the GNU General Public License
+  as published by the Free Software Foundation; either version 2
+  of the License, or (at your option) any later version.
+  
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+  
+  You should have received a copy of the GNU General Public License
+  along with this program; if not, write to the Free Software
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+*/
+
 #include <QFile>
 #include <QImage>
 #include <QPainter>
@@ -34,16 +53,16 @@ int main(int argc, char **argv)
     fprintf(stderr, "Unknown layer %s\n", layerName.toLatin1().data());
     return -1;
   }
-  Tile baseTile = map->quadKeyToTile(layer, rootTileKey);
+  Tile baseTile(layer, rootTileKey);
   int minLevel = baseTile.level;
 
-  if (maxLevel <= baseTile.layer || maxLevel > map->layer(layer).maxLevel) {
+  if (maxLevel <= baseTile.layer || maxLevel > map->layer(layer).maxLevel()) {
     fprintf(stderr, "Invalid maximum level %d\n", maxLevel);
     return -1;    
   }
 
   printf("Merging layer %s from (%d, %d)@%d to %d\n", 
-         map->layer(layer).name.toLatin1().data(),
+         map->layer(layer).name().toLatin1().data(),
          baseTile.x, baseTile.y, baseTile.level, maxLevel);
          
   QRect baseRect(baseTile.x, baseTile.y, 1, 1);

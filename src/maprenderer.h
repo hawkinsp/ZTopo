@@ -1,3 +1,22 @@
+/*
+  ZTopo --- a viewer for topographic maps
+  Copyright (C) 2010 Peter Hawkins
+  
+  This program is free software; you can redistribute it and/or
+  modify it under the terms of the GNU General Public License
+  as published by the Free Software Foundation; either version 2
+  of the License, or (at your option) any later version.
+  
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+  
+  You should have received a copy of the GNU General Public License
+  along with this program; if not, write to the Free Software
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+*/
+
 #ifndef MAPRENDERER_H
 #define MAPRENDERER_H 1
 
@@ -25,7 +44,7 @@ class MapRendererClient {
 class MapRenderer : public QObject {
   Q_OBJECT
 public:
-  MapRenderer(Map *m, QObject *parent = 0);
+  MapRenderer(Map *m, const QString &cachePath, QObject *parent = 0);
 
   void addClient(MapRendererClient *);
   void removeClient(MapRendererClient *);
@@ -50,12 +69,12 @@ public:
 
 
 signals:
-  void tileUpdated(Tile key);
+  void tileUpdated();
 
 private slots:
   // Prune tiles not needed by any client
   void pruneTiles();
-  void tileLoaded(Tile key);
+  void tileLoaded();
 
 private:
   QTimer pruneTimer;
@@ -71,7 +90,7 @@ private:
 
   Map *map;
 
-  TileCache tileCache;
+  Cache::Cache tileCache;
 
   //  void findTile(Tile key, QPixmap &p, QRect &r);
   void drawTile(Tile key, QPainter &p, const QRect &r);

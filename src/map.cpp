@@ -1,4 +1,24 @@
+/*
+  ZTopo --- a viewer for topographic maps
+  Copyright (C) 2010 Peter Hawkins
+  
+  This program is free software; you can redistribute it and/or
+  modify it under the terms of the GNU General Public License
+  as published by the Free Software Foundation; either version 2
+  of the License, or (at your option) any later version.
+  
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+  
+  You should have received a copy of the GNU General Public License
+  along with this program; if not, write to the Free Software
+  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+*/
+
 #include <QChar>
+#include <QDebug>
 #include <QSet>
 #include <QStringBuilder>
 #include <QStringRef>
@@ -16,10 +36,100 @@ uint qHash(const Tile& k)
   return qHash(k.x) ^ qHash(k.y) ^ qHash(k.level) ^ qHash(k.layer);
 }
 
+void quadKeyUnpack(int maxLevel, qkey key, qkey &q, int &layer)
+{
+  layer = key >> (maxLevel * 2 + 1);
+  q = key & (1 << (maxLevel * 2 + 1)) - 1;
+}
+
+qkey quadKeyPack(int maxLevel, qkey q, int layer)
+{
+  return q | (layer << (maxLevel * 2 + 1));
+}
+
+Tile::Tile(int vx, int vy, int vlevel, int vlayer) 
+   : x(vx), y(vy), level(vlevel), layer(vlayer) 
+{
+} 
+
+Tile::Tile(int l, const QString &quad)
+  : x(0), y(0), layer(l), level(quad.length())
+{
+  for (int i = level; i > 0; i--) {
+    int mask = 1 << (i - 1);
+    QChar c = quad[level - i];
+    switch (c.digitValue()) {
+    case 0: break;
+    case 1: x |= mask; break;
+    case 2: y |= mask; break;
+    case 3: x |= mask; y |= mask; break;
+    default:
+      abort();
+    }
+  }
+}
+
+Tile::Tile(qkey q, int maxLevel)
+{
+  layer = q >> (maxLevel * 2 + 1);
+  q &= (1 << (maxLevel * 2 + 1)) - 1;
+  x = 0;
+  y = 0;
+  level = 0;
+  while (q > 1) {
+    x <<= 1;
+    y <<= 1;
+    x |= q & 1;
+    y |= (q & 2) >> 1;
+    level++;
+    q >>= 2;
+   }
+}
+
+
+QString Tile::toQuadKeyString() const
+{
+  QString quad;
+  for (int i = level; i > 0; i--) {
+    char digit = '0';
+    int mask = 1 << (i - 1);
+    if (x & mask) {
+      digit++;
+    }
+    if (y & mask) {
+      digit += 2;
+    }
+    quad.append(digit);
+  }
+  return quad;
+}
+
+
+qkey Tile::toLayerQuadKey() const
+{
+  qkey quad = 1;
+  for (int i = 0; i < level; i++) {
+    int mask = 1 << i;
+    quad <<= 2;
+    if (x & mask) {
+      quad |= 1;
+    }
+    if (y & mask) {
+      quad |= 2;
+    }
+  }
+  return quad;
+}
+
+qkey Tile::toQuadKey(int maxLevel) const
+{
+  assert(level <= maxLevel);
+  return toLayerQuadKey() | (layer << (maxLevel * 2 + 1));
+}
 
 
 Layer::Layer(QString i, QString n, int z, int s) 
-  : id(i), name(n), maxLevel(z), scale(s)
+  : fId(i), fName(n), fMaxLevel(z), fScale(s)
 {
 }
 
@@ -27,18 +137,32 @@ static const QString layerIdField("id");
 static const QString layerNameField("name");
 static const QString layerMaxLevelField("maxLevel");
 static const QString layerScaleField("scale");
-Layer Layer::fromVariant(const QVariant &v)
+static const QString layerStepField("indexLevelStep");
+
+Layer::Layer(const QVariant &v)
 {
   QVariantMap m(v.toMap());
   if (!m.contains(layerIdField) || !m.contains(layerNameField) ||
-      !m.contains(layerMaxLevelField) || !m.contains(layerScaleField)) {
-    qFatal("Label::fromVariant - missing fields");
+      !m.contains(layerMaxLevelField) || !m.contains(layerScaleField) ||
+      !m.contains(layerStepField)) {
+    qFatal("Label::Label(QVariant) - missing fields");
   }
-    return Layer(m[layerIdField].toString(), 
-                 m[layerNameField].toString(), 
-                 m[layerMaxLevelField].toInt(),
-                 m[layerScaleField].toInt());
+  fId = m[layerIdField].toString();
+  fName = m[layerNameField].toString();
+  fMaxLevel = m[layerMaxLevelField].toInt();
+  fScale = m[layerScaleField].toInt();
+  fLevelStep = m[layerStepField].toInt();
+}
 
+int log2_int(int x) 
+{
+  int logx = 0;
+  while (x > 0)
+  {
+    x >>= 1;
+    logx++;
+  }
+  return logx;
 }
 
 Map::Map(const QString &aId, const QString &aName, const QUrl &aBaseUrl, Datum d, 
@@ -57,11 +181,8 @@ Map::Map(const QString &aId, const QString &aName, const QUrl &aBaseUrl, Datum d
   assert(tProjToMap.type() <= QTransform::TxScale && invertible);
 
   QPointF projOrigin = mapToProj().map(QPointF(0.0, 0.0));
-  printf("proj origin %f %f\n", projOrigin.x(), projOrigin.y());
 
   QRectF projArea = QRectF(projOrigin, QSizeF(mapArea.width(), -mapArea.height())).normalized();
-  printf("proj area %f %f %f %f\n", projArea.left(), projArea.top(),
-         projArea.right(), projArea.bottom());
   geoBounds = 
     Geographic::getProjection(d)->transformFrom(pj, projArea)
     .boundingRect().normalized().toAlignedRect();
@@ -70,15 +191,20 @@ Map::Map(const QString &aId, const QString &aName, const QUrl &aBaseUrl, Datum d
   reqSize = projToMap().mapRect(QRect(QPoint(0,0), mapArea.size())).size();
 
   int size = std::max(reqSize.width(), reqSize.height());
-  logSize = 0;
-  while (size > 0)
-  {
-    size >>= 1;
-    logSize++;
-  }
+  logSize = log2_int(size);;
   logBaseTileSz = 8;
   baseTileSz = 1 << logBaseTileSz;
   vMaxLevel = logSize - logBaseTileSz;
+
+  if (maxLevel() * 2 + 1 + log2_int(numLayers()) > sizeof(qkey) * 8) {
+    qFatal("Cannot pack %d levels and %d layers in %ld bytes", maxLevel(), numLayers(), sizeof(qkey));
+  }
+
+  foreach (const Layer &l, layers) {
+    if (l.maxLevel() > maxLevel()) {
+      qFatal("Maximum zoom level of layer exceeds maximum zoom level of map");
+    }
+  }
 
 }
 
@@ -116,7 +242,7 @@ Map *Map::fromVariant(const QVariant &v)
 
   QVector<Layer> layers;
   foreach (QVariant v, m["layers"].toList()) {
-    layers << Layer::fromVariant(v);
+    layers << v;
   }
 
   return new Map(id, name, baseUrl, datum, pj, mapArea, pixelSize, layers);
@@ -140,7 +266,7 @@ QSizeF Map::mapPixelSize() const
 int Map::bestLayerAtLevel(int level) const
 {
   int i = 0;
-  while (i < layers.size() && level > layers[i].maxLevel)
+  while (i < layers.size() && level > layers[i].maxLevel())
     i++;
   
   return (i >= layers.size()) ? layers.size() - 1 : i;
@@ -150,7 +276,7 @@ int Map::bestLayerAtLevel(int level) const
 bool Map::layerById(QString id, int &layer) const
 {
   for (int i = 0; i < layers.size(); i++) {
-    if (layers[i].id == id) {
+    if (layers[i].id() == id) {
       layer = i;
       return true;
     }
@@ -184,44 +310,11 @@ int Map::tileSize(int level) const
   return 1 << logTileSize(level);
 }
 
-QString Map::tileToQuadKey(Tile tile) const
-{
-  QString quad;
-  int x = tile.x, y = tile.y;
-  for (int i = tile.level; i > 0; i--) {
-    char digit = '0';
-    int mask = 1 << (i - 1);
-    if (x & mask) {
-      digit++;
-    }
-    if (y & mask) {
-      digit += 2;
-    }
-    quad.append(digit);
-  }
-  return quad;
-}
 
-unsigned int Map::tileToQuadKeyInt(Tile tile) const
+/*
+qkey Map::quadKeyToQuadKeyInt(QString quad) const
 {
-  unsigned int quad = 1;
-  int x = tile.x, y = tile.y;
-  for (int i = 0; i < tile.level; i++) {
-    int mask = 1 << i;
-    quad <<= 2;
-    if (x & mask) {
-      quad |= 1;
-    }
-    if (y & mask) {
-      quad |= 2;
-    }
-  }
-  return quad;
-}
-
-unsigned int Map::quadKeyToQuadKeyInt(QString quad) const
-{
-  unsigned int q = 1;
+  qkey q = 1;
   for (int i = quad.length() - 1; i >= 0; i--) {
     int c = quad[i].digitValue();
     assert((c & ~3) == 0);
@@ -229,74 +322,13 @@ unsigned int Map::quadKeyToQuadKeyInt(QString quad) const
   }
   return q;
 }
+*/
 
-Tile Map::quadKeyToTile(int layer, QString quad) const
-{
-  int x = 0, y = 0, level = quad.length();
-  for (int i = level; i > 0; i--) {
-    int mask = 1 << (i - 1);
-    QChar c = quad[level - i];
-    switch (c.digitValue()) {
-    case 0: break;
-    case 1: x |= mask; break;
-    case 2: y |= mask; break;
-    case 3: x |= mask; y |= mask; break;
-    default:
-      abort();
-    }
-  }
-  return Tile(x, y, level, layer);
-}
-
-Tile Map::quadKeyIntToTile(int layer, unsigned int q) const
-{
-  int x = 0, y = 0, level = 0;
-  while (q > 1) {
-    x <<= 1;
-    y <<= 1;
-    x |= q & 1;
-    y |= (q & 2) >> 1;
-    level++;
-    q >>= 2;
-   }
-  return Tile(x, y, level, layer);
-}
-
-
-
-QString Map::missingTilesPath(int layer) const {
-  return layers[layer].id % "/missing.txtz";
-}
-
-void Map::loadMissingTiles(int layer, QIODevice &d)
-{
-  d.open(QIODevice::ReadOnly);
-  QByteArray missingCompressed(d.readAll());
-  d.close();
-  if (missingCompressed.isEmpty()) {
-    qWarning("Empty missing tile data for layer %s!\n", layers[layer].id.toLatin1().data());
-    return;
-  }
-
-  QByteArray mData(qUncompress(missingCompressed));
-  if (mData.isEmpty()) {
-    qWarning("Bad missing tile data for layer %s!\n", layers[layer].id.toLatin1().data());
-    return;
-  }
-  QTextStream mStream(mData);
-  
-  while (true) {
-    QString l = mStream.readLine();
-    if (l.isNull()) break;
-    unsigned int q = quadKeyToQuadKeyInt(l);
-    layers[layer].missingTiles.add(q);
-  }
-}
 
 QString Map::tilePath(Tile t) const
 {
-  QString quadKey = tileToQuadKey(t);
-  QString path = layers[t.layer].id % "/";
+  QString quadKey = t.toQuadKeyString();
+  QString path = layers[t.layer].id() % "/";
   for (int i = 0; i < t.level; i += tileDirectoryChunk) {
     QStringRef chunk(&quadKey, i, std::min(tileDirectoryChunk, t.level - i));
     if (i > 0) {
@@ -306,6 +338,12 @@ QString Map::tilePath(Tile t) const
     }
   }
   return path % "t.png";
+}
+
+QString Map::indexFile(qkey q) const
+{
+  Tile t(q, maxLevel());
+  return layer(t.layer).id() % "-t" % t.toQuadKeyString();
 }
 
 QRect Map::mapRectToTileRect(QRect r, int level) const
@@ -354,5 +392,5 @@ int Map::zoomLevel(qreal scaleFactor) const
 {
   qreal scale = std::max(std::min(scaleFactor, 1.0), epsilon);
   qreal r = maxLevel() + log2(scale);
-  return std::max(0, int(ceil(r)));
+  return std::max(1, int(ceil(r)));
 }
