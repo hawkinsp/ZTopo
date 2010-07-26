@@ -3,7 +3,7 @@
     { 
       "id": "topo-ca",
       "name": "California",
-      "baseURL": "http://localhost/ztopo/ca",
+      "baseURL": "http://ztopo.s3.amazonaws.com/maps/ca",
       "datum": "NAD83",
       "projection": "+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +ellps=GRS80 +datum=NAD83 +units=m +no_defs",
       "mapArea": { "x": -525000, "y": 545000, "w": 1200000, "h": 1200000 },

@@ -17,6 +17,7 @@
   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QFileInfo>
 #include <QNetworkReply>
@@ -29,7 +30,7 @@ using namespace boost::intrusive;
 
 static const int numWorkerThreads = 1;
 static const unsigned int maxMemLRUSize = 20000000;
-static const qint64 maxDiskLRUSize = 100000000;
+static const qint64 maxDiskLRUSize = 50000000;
 static const int maxThreadWaitTime = 1000; // Maximum time to wait for a thread to die
 
 static const int maxBufferSize = 500000;
@@ -96,6 +97,8 @@ namespace Cache {
       switch (req.kind) {
       case LoadObject: {
         QByteArray data;
+        QByteArray indexData;
+        QImage tileData;
         if (cache->objectDb) {
           // Do one Get to retrieve the object size, then another to retrieve the object
           Dbt dbKey(&req.tile, sizeof(Key));
@@ -119,8 +122,11 @@ namespace Cache {
             qWarning() << "Error loading cached object " << req.tile;
             data.clear();
           }
+          Cache::decompressObject(req.tile, data, indexData, tileData);
         }
-        emit(objectLoadedFromDisk(req.tile, data));
+        //        emit(objectLoadedFromDisk(req.tile, indexData, tileData));
+        QCoreApplication::postEvent(cache, new NewDataEvent(req.tile, data, indexData, tileData),
+                                    Qt::LowEventPriority);
         break;
       }
         
@@ -177,8 +183,8 @@ namespace Cache {
   
   Cache::Cache(Map *m, const QString &cp)
     : map(m), cachePath(cp), manager(this), memLRUSize(0), diskLRUSize(0),
-      diskCacheHits(0), diskCacheMisses(0), memCacheHits(0), memCacheMisses(0), 
-      dbEnv(NULL), objectDb(NULL), timestampDb(NULL)
+      diskCacheHits(0), diskCacheMisses(0), memCacheHits(0), memCacheMisses(0), numNetworkReqs(0),
+      networkReqSize(0), dbEnv(NULL), objectDb(NULL), timestampDb(NULL)
   {
     try {
       u_int32_t envFlags = DB_CREATE | DB_INIT_MPOOL;
@@ -214,8 +220,8 @@ namespace Cache {
     for (int i = 0; i < numWorkerThreads; i++) {
       IOThread *ioThread = new IOThread(this, this);
       ioThreads << ioThread;
-      connect(ioThread, SIGNAL(objectLoadedFromDisk(Key, QByteArray)),
-              this, SLOT(objectLoadedFromDisk(Key, QByteArray)));
+      //      connect(ioThread, SIGNAL(objectLoadedFromDisk(Key, QByteArray, QImage)),
+      //              this, SLOT(objectLoadedFromDisk(Key, QByteArray, QImage)));
       connect(ioThread, SIGNAL(objectSavedToDisk(Key, bool)),
               this, SLOT(objectSavedToDisk(Key, bool)));
       
@@ -247,6 +253,8 @@ namespace Cache {
     qDebug() << "Disk cache hits: " << diskCacheHits << " misses: " << diskCacheMisses
              << " (" << 
       qreal(diskCacheHits * 100.0) / qreal(diskCacheHits + diskCacheMisses) << "%)";
+    qDebug() << "Network requests: " << numNetworkReqs << " size: " << networkReqSize 
+             << " (" << qreal(networkReqSize) / qreal(numNetworkReqs) << " per request)";
     
     // Clear the cache
     foreach (Entry *t, cacheEntries) {
@@ -297,7 +305,7 @@ namespace Cache {
       e->diskSize = data.get_size();
       e->state = Disk;
       cacheEntries[q] = e;
-      diskLRU.push_back(*e);
+      addToDiskLRU(*e);
     }
     cursor->close();
     
@@ -328,7 +336,7 @@ namespace Cache {
       if (cacheEntries.contains(q)) {
         Entry *e = cacheEntries.value(q);
         e->unlink();
-        diskLRU.push_back(*e);
+        addToDiskLRU(*e);
       }
     }
   }
@@ -417,11 +425,26 @@ namespace Cache {
     }
   }
   
-  bool Cache::decompressObject(Entry *e, const char * data, int len)
+  void Cache::decompressObject(Key key, const QByteArray &compressed, QByteArray &indexData, QImage &tileData)
+  {
+    switch (keyKind(key)) {
+    case IndexKind:
+      indexData = qUncompress(compressed);
+      break;
+      
+    case TileKind: 
+      tileData = QImage::fromData(compressed);
+      break;
+
+    default: qFatal("Unknown key kind in decompressObject");
+    }
+  }
+    
+  bool Cache::loadObject(Entry *e, const QByteArray &indexData, const QImage &tileData)
   {
     switch (keyKind(e->key)) {
     case IndexKind: {
-      e->indexData = qUncompress((const uchar *)data, len);
+      e->indexData = indexData;
       e->memSize = e->indexData.size();
 
       qkey q;
@@ -445,9 +468,8 @@ namespace Cache {
     }
 
     case TileKind: {
-      QImage img = QImage::fromData((const uchar *)data, len);
-      if (img.isNull()) return false;
-      QPixmap *p = new QPixmap(QPixmap::fromImage(img));
+      if (tileData.isNull()) return false;
+      QPixmap *p = new QPixmap(QPixmap::fromImage(tileData));
       e->pixmap = p;
       e->memSize = p->size().width() * p->size().height() * p->depth() / 8;
       return true;
@@ -457,55 +479,98 @@ namespace Cache {
     }
   }
 
-void Cache::maybeFetchIndexPendingTiles() {
-  // There might be tiles waiting on this index. Run over the list of
-  // objects waiting for an index.
-  qDebug() << "Reconsidering index pending list";
-  CacheList::iterator it(indexPending.begin()), itend(indexPending.end());
-  while (it != itend) {
-    Entry &e = *it;
-    it++;
-    maybeMakeNetworkRequest(&e);
-  }
-  flushNetworkRequests();
-}
-
-void Cache::objectLoadedFromDisk(Key q, QByteArray data)
-{
-  assert(cacheEntries.contains(q));
-  Entry *e = cacheEntries.value(q);
-  assert(e->state == Loading);
-
-  e->unlink(); // Should be on loading list
-
-  bool ok = !data.isEmpty();
-  if (ok) {
-    ok = decompressObject(e, data.constData(), data.size());
+  void Cache::maybeFetchIndexPendingTiles() {
+    // There might be tiles waiting on this index. Run over the list of
+    // objects waiting for an index.
+    //    qDebug() << "Reconsidering index pending list";
+    CacheList::iterator it(indexPending.begin()), itend(indexPending.end());
+    while (it != itend) {
+      Entry &e = *it;
+      it++;
+      maybeMakeNetworkRequest(&e);
+    }
+    flushNetworkRequests();
   }
 
-  if (!ok) {
-    e->state = Disk;
-    if (dbEnv) {
-      qDebug() << "WARNING: Could not load object from disk " << q;
-    }
-
-    addToDiskLRU(*e);
-  } else {
-    e->state = DiskAndMemory;
-
-    if (e->inUse) {
-      memInUse.push_back(*e);
-      emit(tileLoaded());
-    } else {
-      addToMemLRU(*e);
-      purgeMemLRU();
-    }
-
-    if (keyKind(e->key) == IndexKind) {
-      maybeFetchIndexPendingTiles();
-    }
+  static const QEvent::Type newDataEventType = QEvent::Type(QEvent::registerEventType());
+  NewDataEvent::NewDataEvent(Key key, const QByteArray &data, const QByteArray &indexData, 
+                             const QImage &tileData) 
+    : QEvent(newDataEventType), fKey(key), fData(data), fIndexData(indexData), fTileData(tileData)
+  {
   }
-}
+
+  bool Cache::event(QEvent *ev)
+  {
+    if (ev->type() == newDataEventType) {
+
+      NewDataEvent *nev = (NewDataEvent *)ev;
+      Key key = nev->key();
+      const QByteArray &data = nev->data();
+      const QByteArray &indexData = nev->indexData();
+      const QImage &tileData = nev->tileData();
+
+      assert(cacheEntries.contains(key));
+      Entry *e = cacheEntries.value(key);
+      assert(e->state == Loading || e->state == NetworkPending);
+
+      bool ok = !indexData.isEmpty() || !tileData.isNull();
+      if (ok) {
+        ok = loadObject(e, indexData, tileData);
+      }
+      
+      e->diskSize = data.size();
+
+      switch (e->state) {
+      case Loading:
+        if (!ok) {
+          e->state = Disk;
+          if (dbEnv) {
+            qDebug() << "WARNING: Could not read disk object " << key;
+          }
+          
+          addToDiskLRU(*e);
+        } else {
+          // qDebug() << "received " << e->key << " from disk";
+          e->state = DiskAndMemory;
+          
+          if (e->inUse) {
+            memInUse.push_back(*e);
+          } else {
+            addToMemLRU(*e);
+            purgeMemLRU();
+          }
+        }
+        break;
+      case NetworkPending:
+        if (ok) {
+          // qDebug() << "received " << e->key << " from network";
+          e->state = Saving;
+      
+          postIORequest(IORequest(SaveObject, key, data));
+        } else {
+          // We had a network error; we have no way to restore the tile to a valid
+          // state so we just dump it. If it is wanted again it will be requested again.
+          qDebug() << "WARNING: Error decoding network object " << key;
+      
+          cacheEntries.remove(key);
+          delete e;
+        }
+        break;
+      }
+
+      if (ok) {
+        if (keyKind(key) == IndexKind) {
+          maybeFetchIndexPendingTiles();
+        }
+        if (e->inUse) {
+          emit(tileLoaded());
+        }
+      }
+      return true;
+    }
+    return QObject::event(ev);
+  }
+
 
 void Cache::objectSavedToDisk(Key q, bool success)
 {
@@ -556,30 +621,26 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
     Entry *e = cacheEntries.value(key);
     assert(e->state == NetworkPending);
    
+
+
     ok = ok && (pos + len <= data.size());
     if (ok) {
-      ok = decompressObject(e, data.constData() + pos, len);
+      QByteArray indexData;
+      QImage tileData;
+
+      QByteArray subData(data.constData() + pos, len);
+      decompressObject(key, subData, indexData, tileData);
+      //      ok = loadObject(e, indexData, tileData);
+      //      e->diskSize = subData.size();
+      QCoreApplication::postEvent(this, new NewDataEvent(key, subData, indexData, tileData), 
+                                  Qt::LowEventPriority);
     }
 
-    if (ok) {
-      e->state = Saving;
-      e->diskSize = data.size();
-      
-      postIORequest(IORequest(SaveObject, key, 
-                              QByteArray(data.constData() + pos, len)));
-      
-      if (keyKind(e->key) == IndexKind) {
-        maybeFetchIndexPendingTiles();
-      }
-      
-      if (e->inUse) {
-        emit(tileLoaded());
-      }
-    } else {
+    if (!ok) {
       // We had a network error; we have no way to restore the tile to a valid
       // state so we just dump it. If it is wanted again it will be requested again.
-      qDebug() << "WARNING: Error reading network object " << key << ": " 
-               << reply->error();
+      qDebug() << "WARNING: Error reading network object " << key << ": " << req.url().toString() << " " 
+               << reply->error() << reply->errorString();
       
       cacheEntries.remove(key);
       delete e;
@@ -689,13 +750,18 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
     len = tileSize(data, pos + digit, datalen);
   }
 
-  void Cache::requestTiles(const QList<Tile> &tiles)
+  bool Cache::requestTiles(const QList<Tile> &tiles)
   {
+    bool present = true;
     foreach (const Tile& tile, tiles) {
       qkey q = tile.toQuadKey(map->maxLevel());
-      requestObject(tileKey(q));
+      bool tilePresent = requestObject(tileKey(q));
+      //if (!tilePresent) { qDebug() << "tile " << tile.x << " " << tile.y << " " << tile.level << " " << 
+      //    tileKey(q) << " present " << tilePresent; }
+      present = present && tilePresent;
     }
     flushNetworkRequests();
+    return present;
   }
 
   void Cache::flushNetworkRequests() {
@@ -727,13 +793,15 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
       req.setUrl(QUrl(url));
       req.setAttribute(keyAttr, qVariantFromValue((void *)bundle));
 
-      //      qDebug() << "req " << url << " off " << n.offset << " len "<< offset - n.offset << " coalesce " << bundle->size();
+      // qDebug() << "req " << url << " off " << n.offset << " len "<< offset - n.offset << " coalesce " << bundle->size();
       if (n.len >= 0) {
         QString rangeHdr = "bytes=" % QString::number(uint(n.offset)) % "-" %
           QString::number(uint(offset - 1));
         req.setRawHeader(QByteArray("Range"), rangeHdr.toLatin1());
       }
 
+      numNetworkReqs++;
+      networkReqSize += offset - n.offset;
       manager.get(req);
     }
 
@@ -765,6 +833,7 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
       // If it's empty, we're done here.
       findTileRange(qtile, idx, offset, len);
       if (len == 0) {
+        // qDebug() << "request " << e->key << " out of range";
         // Object doesn't exist (it's outside the map data), so we're done
         e->state = MemoryOnly;
         e->pixmap = new QPixmap();
@@ -779,6 +848,7 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
     e->unlink();
     e->state = NetworkPending;
 
+    // qDebug() << "request " << e->key << " network get";
     //    qDebug() << "key " << e->key << " q " << q << " " << baseUrl;
     switch (keyKind(e->key)) {
     case TileKind: {
@@ -794,37 +864,48 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
     //    qDebug() << "fetching url " << req.url();
   }
 
-  void Cache::requestObject(Key key)
+  bool Cache::requestObject(Key key)
   {
+    bool present;
     if (cacheEntries.contains(key)) {
       Entry *e = cacheEntries.value(key);
       switch (e->state) {
       case Disk: {
+        // qDebug() << "request " << key << " disk cache hit";
         diskCacheHits++;
         memCacheMisses++;
         removeFromDiskLRU(*e);
         e->state = Loading;  
         e->inUse = true;
-        loadingList.push_back(*e);
         
         postIORequest(IORequest(LoadObject, key, QVariant()));
+        present = false;
         break;
       }      
       case Loading:
       case IndexPending:
       case NetworkPending:
-      case Saving:
+        // qDebug() << "request " << key << " in transition";
         e->inUse = true;
-        break; 
+        present = false;
+        break;
+
+      case Saving:
+        // qDebug() << "request " << key << " in transition";
+        e->inUse = true;
+        present = true;
+        break;
         
       case DiskAndMemory:
       case MemoryOnly:
+        // qDebug() << "request " << key << " memory hit";
         if (!e->inUse) {
           memCacheHits++;
           removeFromMemLRU(*e);
           memInUse.push_back(*e);
           e->inUse = true;
         }
+        present = true;
         break;
         
       default: abort(); // Unreachable
@@ -833,13 +914,16 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
       // Load object from the network.
       memCacheMisses++;
       diskCacheMisses++;
+      // qDebug() << "request " << key << " cache miss";
       Entry *e = new Entry(key);
       cacheEntries[key] = e;
       e->state = IndexPending;
       e->inUse = true;
+      present = false;
       indexPending.push_back(*e);
       maybeMakeNetworkRequest(e);
     } 
+    return present;
   }
 
 

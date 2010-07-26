@@ -23,7 +23,9 @@
 #include <time.h>
 #include <boost/intrusive/list.hpp>
 #include <QDir>
+#include <QEvent>
 #include <QMap>
+#include <QHash>
 #include <QMutex>
 #include <QNetworkAccessManager>
 #include <QRect>
@@ -54,94 +56,109 @@ namespace Cache {
 
   class Cache;
 
-// Possible states of cache entries
-enum State {
-  Disk,           // On disk, not in memory, nothing pending
-  Loading,        // On disk, not yet in memory, disk read IO queued.
-  DiskAndMemory,  // Present on disk and in memory, nothing pending
-  // Present in memory but we gave up on or do not want to save to disk
-  MemoryOnly,     
-  Saving,         // Not yet on disk, in memory, disk write IO queued
-  NetworkPending, // Not on disk, not in memory, waiting on a network request
-  IndexPending,   // Waiting for index data
-  Invalid         // Dummy invalid state
-};
+  // Possible states of cache entries
+  enum State {
+    Disk,           // On disk, not in memory, nothing pending
+    Loading,        // On disk, not yet in memory, disk read IO queued.
+    DiskAndMemory,  // Present on disk and in memory, nothing pending
+    // Present in memory but we gave up on or do not want to save to disk
+    MemoryOnly,     
+    Saving,         // Not yet on disk, in memory, disk write IO queued
+    NetworkPending, // Not on disk, not in memory, waiting on a network request
+    IndexPending,   // Waiting for index data
+    Invalid         // Dummy invalid state
+  };
+  
+  bool isInMemory(State state);
+  
+  // Cache object list hook
+  typedef list_base_hook<link_mode<auto_unlink> > LRUBaseHook;
+  
+  // Cache entries
+  class Entry : public LRUBaseHook {
+  public:
+    Entry(Key key);
+    
+    Key key;
+    QPixmap *pixmap;       
+    QByteArray indexData;
+    unsigned int memSize; 
+    unsigned int diskSize;
+    
+    State state;
+    bool inUse;   // This tile is being viewed
+  };
+  
+  typedef list< Entry, base_hook<LRUBaseHook>, constant_time_size<false> > 
+    CacheList;
 
-bool isInMemory(State state);
 
-// Cache object list hook
-typedef list_base_hook<link_mode<auto_unlink> > LRUBaseHook;
+  // IO requests
+  enum IORequestKind {
+    LoadObject,
+    SaveObject,
+    DeleteObject,
+    UpdateObjectTimestamp,
+    TerminateThread
+  };
 
-// Cache entries
-class Entry : public LRUBaseHook {
-public:
-  Entry(Key key);
-   
-  Key key;
-  QPixmap *pixmap;       
-  QByteArray indexData;
-  unsigned int memSize; 
-  unsigned int diskSize;
+  struct IORequest {
+    IORequest(IORequestKind k, Key t, QVariant d);
+    
+    IORequestKind kind;
+    Key tile;
+    
+    QVariant data;
+  };
+  
+  // Tile IO threads
+  class IOThread : public QThread {
+    Q_OBJECT;
+    
+  public:
+    IOThread(Cache *s, QObject *parent = 0);
+    
+  protected:
+    void run();
+    
+  private:
+    Cache *cache;
+    
+  signals:
+    void objectSavedToDisk(Key key, bool success);
+  };
+  
+  struct NetworkRequest {
+    NetworkRequest(Key key, qkey q, u_int32_t off, u_int32_t len);
+    
+    qkey qid;
+    u_int32_t offset, len;
+    Key key;
 
-  State state;
-  bool inUse;   // This tile is being viewed
-};
+    bool operator<  (const NetworkRequest& other) const {
+      return (qid < other.qid) ||
+        (qid == other.qid && offset < other.offset) ||
+        (qid == other.qid && offset == other.offset && len < other.len) ||  
+        (qid == other.qid && offset == other.offset && len == other.len 
+         && key < other.key);
+    }
+  };
 
-typedef list< Entry, base_hook<LRUBaseHook>, constant_time_size<false> > 
-  CacheList;
-
-
-// IO requests
-enum IORequestKind {
-  LoadObject,
-  SaveObject,
-  DeleteObject,
-  UpdateObjectTimestamp,
-  TerminateThread
-};
-
- struct IORequest {
-   IORequest(IORequestKind k, Key t, QVariant d);
-   
-   IORequestKind kind;
-   Key tile;
-   
-   QVariant data;
- };
  
- // Tile IO threads
- class IOThread : public QThread {
-   Q_OBJECT;
-   
- public:
-   IOThread(Cache *s, QObject *parent = 0);
-   
- protected:
-   void run();
-   
- private:
-   Cache *cache;
-   
- signals:
-   void objectLoadedFromDisk(Key key, QByteArray data);
-   void objectSavedToDisk(Key key, bool success);
- };
+  class NewDataEvent : public QEvent {
+  public:
+    NewDataEvent(Key key, const QByteArray &data, const QByteArray &indexData, const QImage &tileData);
 
- struct NetworkRequest {
-   NetworkRequest(Key key, qkey q, u_int32_t off, u_int32_t len);
-
-   qkey qid;
-   u_int32_t offset, len;
-   Key key;
-
-  bool operator<  (const NetworkRequest& other) const {
-    return (qid < other.qid) ||
-      (qid == other.qid && offset < other.offset) ||
-      (qid == other.qid && offset == other.offset && len < other.len) ||  
-      (qid == other.qid && offset == other.offset && len == other.len 
-       && key < other.key);
-  }
- };
+    Key key() const { return fKey; }
+    const QByteArray &data() const { return fData; }
+    const QByteArray &indexData() const { return fIndexData; }
+    const QImage &tileData() const { return fTileData; }
+    
+  private:
+    Key fKey;
+    QByteArray fData, fIndexData;
+    QImage fTileData;
+  };
 
 // Tile cache
 class Cache : public QObject {
@@ -157,22 +174,23 @@ public:
 
   // Request that the cache obtain a tile; marks the tile as in use. Does nothing if
   // the tile is already available and in use.
-  // Note -- this function is best-effort; you may have to call it at least twice
-  // to actually get the tile. This isn't a problem since we assume the renderer
-  // repeatedly requests the tiles it wants.
-  void requestTiles(const QList<Tile> & key);
+  // Returns true if all the requested tiles are present in memory
+  bool requestTiles(const QList<Tile> & key);
 
   // Mark as unused all tiles outside the given map rectangles
   void pruneObjects(const QList<QRect> &rects);
 
   friend class IOThread;
 
+
+  virtual bool event(QEvent *e);
+  
+
 signals:
   void tileLoaded();
 
 private slots:
   void objectReceivedFromNetwork(QNetworkReply *);
-  void objectLoadedFromDisk(Key key, QByteArray data);
   void objectSavedToDisk(Key key, bool success);
 
 private:
@@ -186,7 +204,7 @@ private:
 
 
   // All currently loaded tiles. All tile entries must be non-NULL.
-  QMap<Key, Entry *> cacheEntries;
+  QHash<Key, Entry *> cacheEntries;
 
   CacheList diskLRU;      // Tiles in state Disk
   qint64 diskLRUSize;    // Compressed size of tiles in state Disk
@@ -194,9 +212,7 @@ private:
   void removeFromDiskLRU(Entry &e);
   void purgeDiskLRU();
 
-  CacheList loadingList; // Tiles in state Loading
-
-  CacheList indexPending;
+  CacheList indexPending; // Objects in state IndexPending
 
   // Tiles in state DiskAndMemory or MemoryOnly which are not in use
   CacheList memLRU;      
@@ -208,7 +224,8 @@ private:
   // Tiles in state DiskAndMemory or MemoryOnly which are in use.
   CacheList memInUse;   
 
-  int diskCacheHits, diskCacheMisses, memCacheHits, memCacheMisses;
+  unsigned int diskCacheHits, diskCacheMisses, memCacheHits, memCacheMisses, numNetworkReqs, networkReqSize;
+
 
   // Everything below this point is accessed by tile IO threads
   // Public for thread class
@@ -228,8 +245,10 @@ private:
   bool parentIndex(qkey q, qkey &idx, qkey &tile);
   void findTileRange(qkey q, Entry *idx, u_int32_t &offset, u_int32_t &len);
 
-  void requestObject(const Key key);
-  bool decompressObject(Entry *e, const char * data, int len);
+  // Request an object. Returns true if the object is present in memory right now.
+  bool requestObject(const Key key);
+  static void decompressObject(Key key, const QByteArray &compressed, QByteArray &indexData, QImage &tileData);
+  bool loadObject(Entry *e, const QByteArray &indexData, const QImage &tileData);
 
   void maybeFetchIndexPendingTiles();
   void maybeMakeNetworkRequest(Entry *e);

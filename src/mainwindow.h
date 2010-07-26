@@ -20,11 +20,15 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H 1
 
+#include <QList>
 #include <QMainWindow>
+#include <QPrinter>
 #include <QString>
+#include <QTimer>
 #include <QVector>
 
 #include "projection.h"
+#include "maprenderer.h"
 
 class QActionGroup;
 class QComboBox;
@@ -48,6 +52,34 @@ class Grid {
   bool utm;
   qreal interval;
   QString label;
+};
+
+class PrintJob : public QObject, public MapRendererClient {
+  Q_OBJECT;
+ public:
+  PrintJob(Map *m, MapRenderer *r, QPrinter *printer, int layer, QPoint mapCenter, qreal mapScale, 
+           QObject *parent);
+  ~PrintJob();
+
+  virtual int currentLayer() const;
+  virtual QRect visibleArea() const;
+
+ private slots:
+  void tileUpdated();
+  void tryPrint();
+
+ private:
+  Map *map;
+  MapRenderer *renderer;
+  QPrinter *printer;
+
+  int layer;
+  QRect mapPixelRect, pageRect;
+  qreal scale, scaleX, scaleY;
+
+  bool done;
+
+  QTimer retryTimer;
 };
 
 class MainWindow : public QMainWindow
@@ -112,6 +144,8 @@ private:
 
   // Print dock widget
   QDockWidget *printDock;
+  QPrinter printer;
+  QList<PrintJob *> printJobs;
 
   // Actions
   QAction *newWindowAction;

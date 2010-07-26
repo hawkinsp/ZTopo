@@ -54,8 +54,9 @@ public:
 
 
   // Load the tiles needed to display a given map area at a given scale.
-  // Loading is asynchronous; this function may return before the loading takes place.
-  void loadTiles(int layer, QRect area, qreal scale, bool wait = false);
+  // Loading is asynchronous; this function usually returns before the loading takes place.
+  // Returns true if all the tiles are present in memory.
+  bool loadTiles(int layer, QRect area, qreal scale);
   
   // Render an area of a map layer onto a paint device at a given scale
   void render(QPainter &p, int layer, QRect area, qreal scale);

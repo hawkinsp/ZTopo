@@ -191,7 +191,7 @@ void MapRenderer::pruneTiles()
   tileCache.pruneObjects(rects);
 }
 
-void MapRenderer::loadTiles(int layer, QRect vis, qreal scale, bool wait)
+bool MapRenderer::loadTiles(int layer, QRect vis, qreal scale)
 {
   int level = std::min(map->zoomLevel(scale), map->layer(layer).maxLevel());
 
@@ -201,11 +201,10 @@ void MapRenderer::loadTiles(int layer, QRect vis, qreal scale, bool wait)
   for (int x = newVisibleTiles.left(); x <= newVisibleTiles.right(); x++) {
     for (int y = newVisibleTiles.top(); y <= newVisibleTiles.bottom(); y++) {
       tiles << Tile(x, y, level, layer);
-      tileCache.requestTiles(tiles);
     }
   }
-
   if (!pruneTimer.isActive()) { pruneTimer.start(pruneTimeout); }
+  return tileCache.requestTiles(tiles);
 }
 
 QPointF MapRenderer::mapToView(QPoint origin, qreal scale, QPointF p)
