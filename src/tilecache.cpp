@@ -25,12 +25,11 @@
 #include <QStringBuilder>
 #include <db_cxx.h>
 #include "tilecache.h"
+#include "consts.h"
 
 using namespace boost::intrusive;
 
 static const int numWorkerThreads = 1;
-static const unsigned int maxMemLRUSize = 20000000;
-static const qint64 maxDiskLRUSize = 50000000;
 static const int maxThreadWaitTime = 1000; // Maximum time to wait for a thread to die
 
 static const int maxBufferSize = 500000;
@@ -122,7 +121,10 @@ namespace Cache {
             qWarning() << "Error loading cached object " << req.tile;
             data.clear();
           }
-          Cache::decompressObject(req.tile, data, indexData, tileData);
+          else {
+            writeMetadata(req.tile, data.size());
+            Cache::decompressObject(req.tile, data, indexData, tileData);
+          }
         }
         //        emit(objectLoadedFromDisk(req.tile, indexData, tileData));
         QCoreApplication::postEvent(cache, new NewDataEvent(req.tile, data, indexData, tileData),
@@ -131,6 +133,7 @@ namespace Cache {
       }
         
       case SaveObject: {
+        //        qDebug() << "saving " << req.tile;
         QByteArray data = req.data.value<QByteArray>();
         Dbt dbKey(&req.tile, sizeof(Key));
         Dbt dbData((void *)data.constData(), data.size());
@@ -139,6 +142,8 @@ namespace Cache {
           ret = cache->objectDb->put(NULL, &dbKey, &dbData, 0);
           if (ret != 0) {
             qWarning() << "Cache database put failed with return code " << ret;
+          } else {
+            writeMetadata(req.tile, data.size());
           }
         }
         emit(objectSavedToDisk(req.tile, ret == 0));
@@ -146,27 +151,39 @@ namespace Cache {
       }
         
       case DeleteObject: {
-        if (cache->objectDb) {
+        // qDebug() << "deleting " << req.tile;
+        if (cache->objectDb && cache->timestampDb) {
           Dbt dbKey(&req.tile, sizeof(Key));
           int ret = cache->objectDb->del(NULL, &dbKey, 0);
           if (ret != 0) {
             qWarning() << "Cache delete " << req.tile << " failed with return code " 
                        << ret;
           }
+          ret = cache->timestampDb->del(NULL, &dbKey, 0);
+          if (ret != 0) {
+            qWarning() << "Cache timestamp delete " << req.tile << " failed with return code " 
+                       << ret;
+          }
+
+
         }      
         break;
       }
         
-      case UpdateObjectTimestamp: {
-        u_int32_t tm = req.data.toUInt();
-        Dbt dbKey(&req.tile, sizeof(Key));
-        Dbt dbData(&tm, sizeof(u_int32_t));
-        int ret = -1;
+      case UpdateObjectMetadata: {
+        writeMetadata(req.tile, req.data.toUInt());
+        break;
+      }
+
+      case ClearCache: {
+        u_int32_t count;
+        if (cache->objectDb) {
+          cache->objectDb->truncate(NULL, &count, 0);
+          cache->objectDb->compact(NULL, NULL, NULL, NULL, DB_FREE_SPACE, NULL);
+        }
         if (cache->timestampDb) {
-          ret = cache->timestampDb->put(NULL, &dbKey, &dbData, 0);
-          if (ret != 0) {
-            qWarning() << "Timestamp put failed with return code " << ret;
-          }
+          cache->timestampDb->truncate(NULL, &count, 0);
+          cache->timestampDb->compact(NULL, NULL, NULL, NULL, DB_FREE_SPACE, NULL);
         }
         break;
       }
@@ -179,10 +196,25 @@ namespace Cache {
       }
     }
   }
+
+  void IOThread::writeMetadata(Key key, u_int32_t size)
+  {
+    u_int32_t timeSize[2] = { std::time(NULL), size };
+    Dbt dbKey(&key, sizeof(Key));
+    Dbt dbData(&timeSize, sizeof(timeSize));
+    int ret = -1;
+    if (cache->timestampDb) {
+      ret = cache->timestampDb->put(NULL, &dbKey, &dbData, 0);
+      if (ret != 0) {
+        qWarning() << "Timestamp put failed with return code " << ret;
+      }
+    }
+  }
   
   
-  Cache::Cache(Map *m, const QString &cp)
-    : map(m), cachePath(cp), manager(this), memLRUSize(0), diskLRUSize(0),
+  Cache::Cache(Map *m, int maxMem, int maxDisk, const QString &cp)
+    : map(m), cachePath(cp), manager(this), maxMemCache(maxMem), 
+      maxDiskCache(maxDisk), memLRUSize(0), diskLRUSize(0),
       diskCacheHits(0), diskCacheMisses(0), memCacheHits(0), memCacheMisses(0), numNetworkReqs(0),
       networkReqSize(0), dbEnv(NULL), objectDb(NULL), timestampDb(NULL)
   {
@@ -276,6 +308,11 @@ namespace Cache {
     }
   }
   
+  void Cache::setCacheSizes(int mem, int disk) {
+    maxMemCache = mem;
+    maxDiskCache = disk;
+    purgeMemLRU();
+  }
   
   typedef QPair<u_int32_t, Key> EntryTime;
   void Cache::initializeCacheFromDatabase()
@@ -288,7 +325,7 @@ namespace Cache {
     int ret;
     
     // Read objects
-    objectDb->cursor(NULL, &cursor, 0);
+    /*    objectDb->cursor(NULL, &cursor, 0);
     if (!cursor) {
       qWarning() << "objectDb.cursor() failed";
       return;
@@ -301,14 +338,9 @@ namespace Cache {
     data.set_ulen(0);
     while ((ret = cursor->get(&key, &data, DB_NEXT)) == 0) {
       assert(key.get_size() == sizeof(Key));
-      Entry *e = new Entry(q);
-      e->diskSize = data.get_size();
-      e->state = Disk;
-      cacheEntries[q] = e;
-      addToDiskLRU(*e);
     }
     cursor->close();
-    
+    */
     // Read timestamps to get LRU order
     timestampDb->cursor(NULL, &cursor, 0);
     if (!cursor) {
@@ -316,28 +348,29 @@ namespace Cache {
       return;
     }
     
-    u_int32_t tm;
+    u_int32_t timeSize[2];
     key.set_data(&q);
     key.set_ulen(sizeof(Key));
     key.set_flags(DB_DBT_USERMEM);
-    data.set_data(&tm);
-    data.set_ulen(sizeof(u_int32_t));
+    data.set_data(&timeSize);
+    data.set_ulen(sizeof(timeSize));
     data.set_flags(DB_DBT_USERMEM);
     
     QVector<EntryTime> tiletimes;
     while ((ret = cursor->get(&key, &data, DB_NEXT)) == 0) {
-      assert(key.get_size() == sizeof(Key) && data.get_size() == sizeof(u_int32_t)); 
-      tiletimes << EntryTime(tm, q);
+      assert(key.get_size() == sizeof(Key) && data.get_size() == sizeof(timeSize)); 
+      Entry *e = new Entry(q);
+      e->diskSize = timeSize[1];
+      e->state = Disk;
+      cacheEntries[q] = e;
+      tiletimes << EntryTime(timeSize[0], q);
     }
     cursor->close();
     qSort(tiletimes);
     foreach (const EntryTime &t, tiletimes) {
       q = t.second;
-      if (cacheEntries.contains(q)) {
-        Entry *e = cacheEntries.value(q);
-        e->unlink();
-        addToDiskLRU(*e);
-      }
+      Entry *e = cacheEntries.value(q);
+      addToDiskLRU(*e);
     }
   }
   
@@ -383,6 +416,7 @@ namespace Cache {
   
   void Cache::purgeDiskLRU()
   {
+    qint64 maxDiskLRUSize = qint64(maxDiskCache) * qint64(bytesPerMb);
     while (diskLRUSize > maxDiskLRUSize) {
       assert(!diskLRU.empty());
       Entry &e = diskLRU.front();
@@ -396,11 +430,27 @@ namespace Cache {
       delete &e;
     }
   }
+
+  void Cache::emptyDiskCache()
+  {
+    postIORequest(IORequest(ClearCache, 0, QVariant()));
+    while (!diskLRU.empty()) {
+      Entry &e = diskLRU.front();
+      diskLRU.pop_front();
+      
+      assert(e.state == Disk && e.pixmap == NULL);
+      
+      cacheEntries.remove(e.key);
+      delete &e;
+    }
+
+    diskLRUSize = 0;
+  }
   
   void Cache::purgeMemLRU()
   {
     time_t tm = std::time(NULL);
-    while (memLRUSize > maxMemLRUSize) {
+    while (memLRUSize > ((unsigned int)maxMemCache) * bytesPerMb) {
       assert(!memLRU.empty());
       Entry &e = memLRU.front();
       
@@ -414,15 +464,15 @@ namespace Cache {
       
       if (e.state == DiskAndMemory) {
         e.state = Disk;
-        postIORequest(IORequest(UpdateObjectTimestamp, e.key, QVariant((u_int32_t)tm)));
+        postIORequest(IORequest(UpdateObjectMetadata, e.key, QVariant(e.diskSize)));
         addToDiskLRU(e);
-        purgeDiskLRU();
       } else {
         assert(e.state == MemoryOnly);
         cacheEntries.remove(e.key);
         delete &e;
       }
     }
+    purgeDiskLRU();
   }
   
   void Cache::decompressObject(Key key, const QByteArray &compressed, QByteArray &indexData, QImage &tileData)

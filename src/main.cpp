@@ -86,7 +86,9 @@ int main(int argc, char **argv)
                       QDesktopServices::storageLocation(QDesktopServices::CacheLocation)).toString();
   QDir::current().mkpath(cachePath);
 
-  MapRenderer renderer(map, cachePath);
+  int maxMemCache = settings.value(settingMemCache, 64).toInt();
+  int maxDiskCache = settings.value(settingDiskCache, 200).toInt();
+  MapRenderer renderer(map, maxMemCache, maxDiskCache, cachePath);
   MainWindow *window = new MainWindow(map, &renderer);
   //  QPixmapCache::setCacheLimit(50000);
 

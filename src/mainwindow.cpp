@@ -43,12 +43,16 @@
 #include "map.h"
 #include "maprenderer.h"
 #include "projection.h"
+#include "preferences.h"
 #include "coordformatter.h"
 #include "consts.h"
 
 #include <iostream>
 
 static const int retryTimeout = 500; // Wait 500ms for tiles to arrive before retrying a print job
+QString settingMemCache = "maxMemCache";
+QString settingDiskCache = "maxDiskCache";
+QString settingDpi = "screenDpi";
 
 QVector<MainWindow *> windowList;
 
@@ -76,9 +80,6 @@ MainWindow::MainWindow(Map *m, MapRenderer *r, QWidget *parent)
   grids << Grid(true, false, 0.25, tr("15'"));
   grids << Grid(true, false, 0.5, tr("30'"));
   grids << Grid(true, false, 0.5, trUtf8("1\xc2\xb0"));
-
-  screenDotsPerMeter = qreal(98) / metersPerInch;
-  //  screenDotsPerMeter = qreal(logicalDpiX()) / metersPerInch;
 
   createWidgets();
   createActions();
@@ -244,8 +245,9 @@ void MainWindow::printTriggered(bool)
 
   //  QPrinter *p = new QPrinter(QPrinter::HighResolution);
   //  clonePrinter(printer, *p);
+  int dpi = (screenDpi <= 0) ? logicalDpiX() : screenDpi;
 
-  qreal scale = (map->mapPixelSize().width() * screenDotsPerMeter) 
+  qreal scale = (map->mapPixelSize().width() * dpi / metersPerInch)
     / view->currentScale(); 
 
   PrintJob *job = new PrintJob(map, renderer, &printer, view->currentLayer(), view->center(), scale, this);
@@ -351,6 +353,9 @@ void MainWindow::createActions()
   connect(datumActionGroup, SIGNAL(triggered(QAction *)),
           this, SLOT(datumChanged(QAction *)));
 
+  preferencesAction = new QAction(tr("&Preferences..."), this);
+  connect(preferencesAction, SIGNAL(triggered()),
+          this, SLOT(preferencesTriggered()));
 
   // Map grids
   gridActionGroup = new QActionGroup(this);
@@ -434,6 +439,8 @@ void MainWindow::createMenus()
   fileMenu->addAction(pageSetupAction);
 
   QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
+  viewMenu->addAction(preferencesAction);
+  viewMenu->addSeparator();
   viewMenu->addAction(showToolBarAction);
   viewMenu->addAction(showStatusBarAction);
 
@@ -479,6 +486,7 @@ void MainWindow::createMenus()
 void MainWindow::readSettings()
 {
   QSettings settings;
+  screenDpi = settings.value(settingDpi, 0).toInt();
   restoreGeometry(settings.value("geometry").toByteArray());
   restoreState(settings.value("windowState").toByteArray());
 }
@@ -526,6 +534,25 @@ void MainWindow::newWindowTriggered()
 {
   MainWindow *m = new MainWindow(map, renderer);
   m->show();
+}
+
+void MainWindow::preferencesTriggered()
+{
+  Cache::Cache &cache = renderer->getCache();
+  PreferencesDialog prefDlg(cache);
+  prefDlg.setDpi(screenDpi);
+  prefDlg.setCacheSizes(cache.getMemCacheSize(), cache.getDiskCacheSize());
+  int ret = prefDlg.exec();
+
+  if (ret != QDialog::Accepted)
+    return;
+
+  screenDpi = prefDlg.getDpi();
+  cache.setCacheSizes(prefDlg.getMemSize(), prefDlg.getDiskSize());
+  QSettings settings;
+  settings.setValue(settingDpi, screenDpi);
+  settings.setValue(settingMemCache, prefDlg.getMemSize());
+  settings.setValue(settingDiskCache, prefDlg.getDiskSize());
 }
 
 void MainWindow::windowListChanged()
@@ -631,7 +658,9 @@ void MainWindow::updatePosition(QPoint m)
 void MainWindow::scaleChanged(float scaleFactor)
 {
   //  printf("dpi %d %d phys %d %d\n", logicalDpiX(), logicalDpiY(), physicalDpiX(), physicalDpiY());
-  qreal scale = (map->mapPixelSize().width() * screenDotsPerMeter) 
-    / scaleFactor; 
+  int dpi = (screenDpi <= 0) ? logicalDpiX() : screenDpi;
+
+  qreal scale = (map->mapPixelSize().width() * dpi / metersPerInch)
+    / scaleFactor;
   scaleLabel->setText("1:" + QString::number(int(scale)));
 }

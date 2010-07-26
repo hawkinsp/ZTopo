@@ -98,7 +98,8 @@ namespace Cache {
     LoadObject,
     SaveObject,
     DeleteObject,
-    UpdateObjectTimestamp,
+    UpdateObjectMetadata,
+    ClearCache,
     TerminateThread
   };
 
@@ -123,6 +124,8 @@ namespace Cache {
     
   private:
     Cache *cache;
+
+    void writeMetadata(Key key, u_int32_t size);
     
   signals:
     void objectSavedToDisk(Key key, bool success);
@@ -164,8 +167,16 @@ namespace Cache {
 class Cache : public QObject {
   Q_OBJECT;
 public:
-  Cache(Map *map, const QString &cachePath);
+  Cache(Map *map, int maxMem, int maxDisk, const QString &cachePath);
   ~Cache();
+
+  int getMemCacheSize() { return maxMemCache; }
+  int getDiskCacheSize() { return maxDiskCache; }
+
+  void setCacheSizes(int memMb, int diskMb);
+
+  void emptyDiskCache();
+
 
   // Find a tile if present in the cache; do nothing if the tile is not present.
   // Returns true if the tile was found; the pixmap will not be updated if the tile
@@ -202,6 +213,8 @@ private:
 
   QNetworkAccessManager manager;
 
+  int maxMemCache;
+  int maxDiskCache;
 
   // All currently loaded tiles. All tile entries must be non-NULL.
   QHash<Key, Entry *> cacheEntries;

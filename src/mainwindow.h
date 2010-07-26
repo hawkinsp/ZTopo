@@ -82,6 +82,8 @@ class PrintJob : public QObject, public MapRendererClient {
   QTimer retryTimer;
 };
 
+extern QString settingMemCache, settingDiskCache, settingDpi;
+
 class MainWindow : public QMainWindow
 {
   Q_OBJECT
@@ -103,6 +105,7 @@ private slots:
   void zoomInTriggered();
   void zoomOutTriggered();
 
+  void preferencesTriggered();
   void newWindowTriggered();
   void minimizeTriggered();
   void windowZoomTriggered();
@@ -132,8 +135,8 @@ private:
   // Possible grids to display
   QVector<Grid> grids;
 
-  // Dots per meter of the current screen
-  qreal screenDotsPerMeter;
+  // Dots per inch of the current screen; 0 = use value reported by Qt
+  int screenDpi;
 
   QToolBar *toolBar;
 
@@ -162,7 +165,7 @@ private:
   
   QAction *zoomInAction, *zoomOutAction;
 
-
+  QAction *preferencesAction;
   QAction *minimizeAction;
   QAction *zoomAction;
   QAction *bringFrontAction;

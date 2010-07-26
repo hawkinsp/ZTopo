@@ -44,7 +44,8 @@ class MapRendererClient {
 class MapRenderer : public QObject {
   Q_OBJECT
 public:
-  MapRenderer(Map *m, const QString &cachePath, QObject *parent = 0);
+  MapRenderer(Map *m, int maxMem, int maxDisk, const QString &cachePath, 
+              QObject *parent = 0);
 
   void addClient(MapRendererClient *);
   void removeClient(MapRendererClient *);
@@ -68,6 +69,7 @@ public:
   void renderUTMGrid(QPainter &p, QRect area, qreal scale, Datum d,
                      qreal interval);
 
+  Cache::Cache &getCache() { return tileCache; }
 
 signals:
   void tileUpdated();

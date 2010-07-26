@@ -12,6 +12,7 @@ set(ztopo_SRCS
   mainwindow.cpp
   maprenderer.cpp
   mapwidget.cpp
+  preferences.cpp
   tilecache.cpp
   ${common_SRCS})
 set(ztopo_MOC_HDRS
@@ -19,9 +20,13 @@ set(ztopo_MOC_HDRS
   maprenderer.h
   mapwidget.h
   tilecache.h
+  preferences.h
 )
 set(ztopo_RCCS
   images.qrc
+)  
+set(ztopo_UIS
+  preferences.ui
 )  
 set(import_SRCS
   import.cpp
@@ -30,10 +35,17 @@ set(merge_SRCS
   merge.cpp
   ${common_SRCS})
 
+
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})
+
 QT4_ADD_RESOURCES(ztopo_RCC_SRCS ${ztopo_RCCS})
 QT4_WRAP_CPP(ztopo_MOC_SRCS ${ztopo_MOC_HDRS})
+QT4_WRAP_UI(ztopo_UI_SRCS ${ztopo_UIS})
 
-add_executable(ztopo MACOSX_BUNDLE ${ztopo_SRCS} ${ztopo_MOC_SRCS} ${ztopo_RCC_SRCS})
+
+
+add_executable(ztopo MACOSX_BUNDLE ${ztopo_SRCS} ${ztopo_MOC_SRCS}
+${ztopo_RCC_SRCS} ${ztopo_UI_SRCS})
 add_executable(import ${import_SRCS})
 add_executable(merge ${merge_SRCS})
 
