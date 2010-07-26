@@ -199,7 +199,7 @@ namespace Cache {
 
   void IOThread::writeMetadata(Key key, u_int32_t size)
   {
-    u_int32_t timeSize[2] = { std::time(NULL), size };
+    u_int32_t timeSize[2] = { time(NULL), size };
     Dbt dbKey(&key, sizeof(Key));
     Dbt dbData(&timeSize, sizeof(timeSize));
     int ret = -1;
@@ -449,7 +449,7 @@ namespace Cache {
   
   void Cache::purgeMemLRU()
   {
-    time_t tm = std::time(NULL);
+    time_t tm = time(NULL);
     while (memLRUSize > ((unsigned int)maxMemCache) * bytesPerMb) {
       assert(!memLRU.empty());
       Entry &e = memLRU.front();
