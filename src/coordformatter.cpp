@@ -20,7 +20,7 @@
 #include <QObject>
 #include <QStringBuilder>
 #include "coordformatter.h"
-#include "consts.h";
+#include "consts.h"
 
 
 DecimalDegreeFormatter::DecimalDegreeFormatter()

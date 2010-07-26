@@ -103,7 +103,7 @@ private:
   void rulerInterval(qreal length, qreal &interval, int &ilog);
 
   // Render a grid on a projection
-  void renderGrid(QPainter &p, QRect area, Projection *p, 
+  void renderGrid(QPainter &p, QRect area, Projection *pj, 
                   qreal interval);
 };
 
