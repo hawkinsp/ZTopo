@@ -87,8 +87,8 @@ void MapRenderer::drawTile(Tile key, QPainter &p, const QRect &dstRect)
 
   // Look in the current level. If found, we're done and we need not draw
   // anything else
-  for (int layer = key.layer; layer >= 0; layer--) {
-    Tile t(key.x, key.y, key.level, layer);
+  for (int layer = key.layer(); layer >= 0; layer--) {
+    Tile t(key.x(), key.y(), key.level(), layer);
 
     if (tileCache.getTile(key, pixmap)) {
       p.drawPixmap(dstRect, pixmap, QRect(0, 0, 1 << logTileSize, 1 << logTileSize));
@@ -98,17 +98,17 @@ void MapRenderer::drawTile(Tile key, QPainter &p, const QRect &dstRect)
 
   // Look at all levels above us
   bool doneAbove = false;
-  for (int level = key.level - 1; !doneAbove && level >= map->minLevel(); level--) {
-    int deltaLevel = key.level - level;
-    for (int layer = key.layer; !doneAbove && layer >= 0; layer--) {
-      Tile t(key.x >> deltaLevel, key.y >> deltaLevel, level, layer);
+  for (int level = key.level() - 1; !doneAbove && level >= map->minLevel(); level--) {
+    int deltaLevel = key.level() - level;
+    for (int layer = key.layer(); !doneAbove && layer >= 0; layer--) {
+      Tile t(key.x() >> deltaLevel, key.y() >> deltaLevel, level, layer);
 
       if (tileCache.getTile(t, pixmap)) {
         // Size of the destination tile in the source space
         int logSubSize = logTileSize - deltaLevel;
         int mask = (1 << deltaLevel) - 1;
-        int subX = (key.x & mask) << logSubSize;
-        int subY = (key.y & mask) << logSubSize;
+        int subX = (key.x() & mask) << logSubSize;
+        int subY = (key.y() & mask) << logSubSize;
         int size = 1 << logSubSize;
         p.drawPixmap(dstRect, pixmap, QRect(subX, subY, size, size));
         doneAbove = true;
@@ -118,7 +118,7 @@ void MapRenderer::drawTile(Tile key, QPainter &p, const QRect &dstRect)
 
   // Look one level below us. Overdraw whatever we can find on whatever we already
   // drew.
-  int level = key.level + 1;
+  int level = key.level() + 1;
   if (level <= map->maxLevel()) {
     int deltaLevel = 1;
     int deltaSize = 1 << deltaLevel;
@@ -126,7 +126,8 @@ void MapRenderer::drawTile(Tile key, QPainter &p, const QRect &dstRect)
       for (int y = 0; y < deltaSize; y++) {
         bool found = false;
         for (int layer = map->numLayers() - 1; !found && layer >= 0; layer--) {
-          Tile t((key.x << deltaLevel) + x, (key.y << deltaLevel) + y, level, layer);
+          Tile t((key.x() << deltaLevel) + x, (key.y() << deltaLevel) + y, 
+                 level, layer);
           if (tileCache.getTile(t, pixmap)) {
             // Size of the source tile in the destination space
             qreal dstSizeX = qreal(dstRect.width()) / qreal(1 << deltaLevel);

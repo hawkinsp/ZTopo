@@ -36,44 +36,45 @@ static const int tileDirectoryChunk = 3;
 int log2_int(int x);
 
 
-// x, y, level, layer tuple packed as an integer
+// x, y, level tuple packed as an integer
 // Layout:
-// 00LL001YXYXYXYX
+// 001YXYXYXYX
 typedef u_int32_t qkey;
-
-void quadKeyUnpack(int maxLevel, qkey key, qkey &q, int &layer);
-qkey quadKeyPack(int maxLevel, qkey q, int layer);
 
 // Tile coordinates
 class Tile {
 public:
   Tile() {}
-  Tile(qkey q, int maxLevel);
+  Tile(int layer, qkey q);
   Tile(int layer, const QString &);
   Tile(int vx, int vy, int vlevel, int vlayer);
 
+  int layer() const { return flayer; }
+  int level() const { return flevel; }
+  int x() const { return fx; }
+  int y() const { return fy; }
+
   // Convert a tile to a quad key; requires the maximum zoom level of the map
-  qkey toQuadKey(int maxLayer) const;
+  qkey toQuadKey() const;
+  QString toQuadKeyString() const; // Return tile as a quad key string
 
-  // Convert a tile to a quad key specific for a map layer
-  qkey toLayerQuadKey() const;
-  
-  QString toQuadKeyString() const; // Return tile as a quad key string, no layer
+private:
 
-  int x;
-  int y;
-  int level;
-  int layer;
+  int fx;
+  int fy;
+  int flevel;
+  int flayer;
 
   bool operator== (const Tile& other) const {
-    return x == other.x && y == other.y && level == other.level &&
-      layer == other.layer; 
+    return fx == other.fx && fy == other.fy && flevel == other.flevel &&
+      flayer == other.flayer; 
   }
   bool operator<  (const Tile& other) const {
-    return (x < other.x) ||
-      (x == other.x && y < other.y) ||
-      (x == other.x && y == other.y && level < other.level) ||  
-      (x == other.x && y == other.y && level == other.level && layer < other.layer);
+    return (fx < other.fx) ||
+      (fx == other.fx && fy < other.fy) ||
+      (fx == other.fx && fy == other.fy && flevel < other.flevel) ||  
+      (fx == other.fx && fy == other.fy && flevel == other.flevel 
+       && flayer < other.flayer);
   }
 };
 
@@ -92,7 +93,7 @@ class Layer
   const int maxLevel() const { return fMaxLevel; }
   const int indexLevelStep() const { return fLevelStep; }
   const int scale() const { return fScale; }
-
+  
  private:
   QString fId, fName; // Short and descriptive names
   int fMaxLevel;  // Maximum tile zoom level 
@@ -138,7 +139,7 @@ public:
 
   // Filename of a given tile
   QString tilePath(Tile t) const;
-  QString indexFile(qkey q) const;
+  QString indexFile(int layer, qkey q) const;
 
   // Filename of the missing tiles file
   //  QString missingTilesPath(int layer) const;
@@ -167,6 +168,11 @@ public:
   int numLayers() const { return layers.size(); }
   const Layer &layer(int id) const { return layers[id]; }
   bool layerById(QString name, int &layer) const;
+
+  // Split a quad key into an index quad key and a tile quad key
+  bool parentIndex(qkey key, qkey &index, qkey &tile) const;
+  int indexNumLevels(qkey index) const;
+
 
   //  Tile quadKeyToTile(int layer, QString quadKey) const;
   //  QString tileToQuadKey(Tile t) const;

@@ -54,23 +54,23 @@ int main(int argc, char **argv)
     return -1;
   }
   Tile baseTile(layer, rootTileKey);
-  int minLevel = baseTile.level;
+  int minLevel = baseTile.level();
 
-  if (maxLevel <= baseTile.layer || maxLevel > map->layer(layer).maxLevel()) {
+  if (maxLevel <= baseTile.layer() || maxLevel > map->layer(layer).maxLevel()) {
     fprintf(stderr, "Invalid maximum level %d\n", maxLevel);
     return -1;    
   }
 
   printf("Merging layer %s from (%d, %d)@%d to %d\n", 
          map->layer(layer).name().toLatin1().data(),
-         baseTile.x, baseTile.y, baseTile.level, maxLevel);
+         baseTile.x(), baseTile.y(), baseTile.level(), maxLevel);
          
-  QRect baseRect(baseTile.x, baseTile.y, 1, 1);
+  QRect baseRect(baseTile.x(), baseTile.y(), 1, 1);
   int tileSize = map->baseTileSize();
   
   for (int level = maxLevel - 1; level >= minLevel; level--) {
     printf("level %d\n", level);
-    QRect tiles = map->rectAtLevel(baseRect, baseTile.level, level);
+    QRect tiles = map->rectAtLevel(baseRect, baseTile.level(), level);
     
     for (int y = tiles.top(); y <= tiles.bottom(); y++) {
       for (int x = tiles.left(); x <= tiles.right(); x++) {

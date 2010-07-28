@@ -1,7 +1,9 @@
 #!/bin/sh
 
 series="$1"
+mkdir -p final/$series
 for bucket in `cat "$series"-buckets.txt`; do
-    cp $series-$bucket.idx final/
-    cat $series-$bucket.txt | xargs cat >> final/$series-$bucket.dat
+    ~/geo/ztopo/util/compress.py $series-$bucket.idx 
+    cp $series-$bucket.idxz final/$series/$bucket.idxz
+    cat $series-$bucket.lst | xargs cat >> final/$series/$bucket.dat
 done

@@ -305,6 +305,8 @@ void MainWindow::createActions()
   printAction->setShortcuts(QKeySequence::Print);
   connect(printAction, SIGNAL(triggered(bool)), this, SLOT(printTriggered(bool)));
 
+  closeAction = new QAction(tr("&Close"), this);
+  connect(closeAction, SIGNAL(triggered(bool)), this, SLOT(close()));
 
   // Map Layers
   layerActionGroup = new QActionGroup(this);
@@ -437,6 +439,12 @@ void MainWindow::createMenus()
   fileMenu->addSeparator();
   fileMenu->addAction(printAction);
   fileMenu->addAction(pageSetupAction);
+#ifndef Q_WS_MAC
+  // The "Close" menu item doesn't fit into the Mac UI guidelines; Qt automatically generates
+  // a suitable menu item anyway.
+  fileMenu->addSeparator();
+  fileMenu->addAction(closeAction);
+#endif
 
   QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
   viewMenu->addAction(preferencesAction);

@@ -50,7 +50,9 @@ int main(int argc, char **argv)
   QApplication app(argc, argv);
 
   QString rootDataName("root.json");
+
  #ifdef Q_WS_MAC
+  // Mac OS specific code to find resources within a bundle
   CFURLRef appUrlRef = CFBundleCopyBundleURL(CFBundleGetMainBundle());
   CFStringRef macPath = CFURLCopyFileSystemPath(appUrlRef,
                                                 kCFURLPOSIXPathStyle);

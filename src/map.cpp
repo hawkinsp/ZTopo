@@ -33,55 +33,43 @@
 
 uint qHash(const Tile& k)
 {
-  return qHash(k.x) ^ qHash(k.y) ^ qHash(k.level) ^ qHash(k.layer);
-}
-
-void quadKeyUnpack(int maxLevel, qkey key, qkey &q, int &layer)
-{
-  layer = key >> (maxLevel * 2 + 1);
-  q = key & (1 << (maxLevel * 2 + 1)) - 1;
-}
-
-qkey quadKeyPack(int maxLevel, qkey q, int layer)
-{
-  return q | (layer << (maxLevel * 2 + 1));
+  return qHash(k.x()) ^ qHash(k.y()) ^ qHash(k.level()) ^ qHash(k.layer());
 }
 
 Tile::Tile(int vx, int vy, int vlevel, int vlayer) 
-   : x(vx), y(vy), level(vlevel), layer(vlayer) 
+   : fx(vx), fy(vy), flevel(vlevel), flayer(vlayer) 
 {
 } 
 
 Tile::Tile(int l, const QString &quad)
-  : x(0), y(0), layer(l), level(quad.length())
+  : fx(0), fy(0), flayer(l), flevel(quad.length())
 {
-  for (int i = level; i > 0; i--) {
+  for (int i = flevel; i > 0; i--) {
     int mask = 1 << (i - 1);
-    QChar c = quad[level - i];
+    QChar c = quad[flevel - i];
     switch (c.digitValue()) {
     case 0: break;
-    case 1: x |= mask; break;
-    case 2: y |= mask; break;
-    case 3: x |= mask; y |= mask; break;
+    case 1: fx |= mask; break;
+    case 2: fy |= mask; break;
+    case 3: fx |= mask; fy |= mask; break;
     default:
       abort();
     }
   }
 }
 
-Tile::Tile(qkey q, int maxLevel)
+Tile::Tile(int layer, qkey q)
+  : flayer(layer)
 {
-  layer = q >> (maxLevel * 2 + 1);
-  q &= (1 << (maxLevel * 2 + 1)) - 1;
-  x = 0;
-  y = 0;
-  level = 0;
+  fx = 0;
+  fy = 0;
+  flevel = 0;
   while (q > 1) {
-    x <<= 1;
-    y <<= 1;
-    x |= q & 1;
-    y |= (q & 2) >> 1;
-    level++;
+    fx <<= 1;
+    fy <<= 1;
+    fx |= q & 1;
+    fy |= (q & 2) >> 1;
+    flevel++;
     q >>= 2;
    }
 }
@@ -90,13 +78,13 @@ Tile::Tile(qkey q, int maxLevel)
 QString Tile::toQuadKeyString() const
 {
   QString quad;
-  for (int i = level; i > 0; i--) {
+  for (int i = flevel; i > 0; i--) {
     char digit = '0';
     int mask = 1 << (i - 1);
-    if (x & mask) {
+    if (fx & mask) {
       digit++;
     }
-    if (y & mask) {
+    if (fy & mask) {
       digit += 2;
     }
     quad.append(digit);
@@ -105,28 +93,21 @@ QString Tile::toQuadKeyString() const
 }
 
 
-qkey Tile::toLayerQuadKey() const
+qkey Tile::toQuadKey() const
 {
   qkey quad = 1;
-  for (int i = 0; i < level; i++) {
+  for (int i = 0; i < flevel; i++) {
     int mask = 1 << i;
     quad <<= 2;
-    if (x & mask) {
+    if (fx & mask) {
       quad |= 1;
     }
-    if (y & mask) {
+    if (fy & mask) {
       quad |= 2;
     }
   }
   return quad;
 }
-
-qkey Tile::toQuadKey(int maxLevel) const
-{
-  assert(level <= maxLevel);
-  return toLayerQuadKey() | (layer << (maxLevel * 2 + 1));
-}
-
 
 Layer::Layer(QString i, QString n, int z, int s) 
   : fId(i), fName(n), fMaxLevel(z), fScale(s)
@@ -311,6 +292,8 @@ int Map::tileSize(int level) const
 }
 
 
+
+
 /*
 qkey Map::quadKeyToQuadKeyInt(QString quad) const
 {
@@ -328,9 +311,9 @@ qkey Map::quadKeyToQuadKeyInt(QString quad) const
 QString Map::tilePath(Tile t) const
 {
   QString quadKey = t.toQuadKeyString();
-  QString path = layers[t.layer].id() % "/";
-  for (int i = 0; i < t.level; i += tileDirectoryChunk) {
-    QStringRef chunk(&quadKey, i, std::min(tileDirectoryChunk, t.level - i));
+  QString path = layers[t.layer()].id() % "/";
+  for (int i = 0; i < t.level(); i += tileDirectoryChunk) {
+    QStringRef chunk(&quadKey, i, std::min(tileDirectoryChunk, t.level() - i));
     if (i > 0) {
       path.append("/" % chunk);
     } else {
@@ -340,10 +323,10 @@ QString Map::tilePath(Tile t) const
   return path % "t.png";
 }
 
-QString Map::indexFile(qkey q) const
+QString Map::indexFile(int layerId, qkey q) const
 {
-  Tile t(q, maxLevel());
-  return layer(t.layer).id() % "-t" % t.toQuadKeyString();
+  Tile t(layerId, q);
+  return layer(layerId).id() % "-t" % t.toQuadKeyString();
 }
 
 QRect Map::mapRectToTileRect(QRect r, int level) const
@@ -359,9 +342,9 @@ QRect Map::mapRectToTileRect(QRect r, int level) const
 
 QRect Map::tileToMapRect(Tile t) const
 {
-  int logSize = logTileSize(t.level);
+  int logSize = logTileSize(t.level());
   int size = 1 << logSize;
-  return QRect(t.x << logSize, t.y << logSize, size, size);
+  return QRect(t.x() << logSize, t.y() << logSize, size, size);
 }
 
 QRect Map::rectAtLevel(QRect r, int fromLevel, int toLevel) const

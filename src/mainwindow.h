@@ -154,6 +154,7 @@ private:
   QAction *newWindowAction;
   QAction *printAction;
   QAction *pageSetupAction;
+  QAction *closeAction;
 
   QActionGroup *layerActionGroup;
   QActionGroup *coordFormatActionGroup;

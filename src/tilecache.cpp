@@ -41,17 +41,21 @@ namespace Cache {
   typedef QPair<Key, u_int32_t> NetworkReqKey;
 
   static const int kindShift = 56;
+  static const int layerShift = 48;
   Kind keyKind(Key k) {
     return Kind(k >> kindShift);
+  }
+  int keyLayer(Key k) { 
+    return int(k >> layerShift) & 0xFF;
   }
   qkey keyQuad(Key k) {
     return qkey(k & ((Key(1) << kindShift) - 1));
   }
-  Key tileKey(qkey k) {
-    return (Key(TileKind) << kindShift) | k;
+  Key tileKey(int layer, qkey k) {
+    return (Key(TileKind) << kindShift) | Key(layer) << layerShift | k;
   }
-  Key indexKey(qkey k) {
-    return (Key(IndexKind) << kindShift) | k;
+  Key indexKey(int layer, qkey k) {
+    return (Key(IndexKind) << kindShift) | Key(layer) << layerShift | k;
   }
 
   bool isInMemory(State s)
@@ -490,16 +494,16 @@ namespace Cache {
     }
   }
     
-  bool Cache::loadObject(Entry *e, const QByteArray &indexData, const QImage &tileData)
+  bool Cache::loadObject(Entry *e, const QByteArray &indexData, 
+                         const QImage &tileData)
   {
     switch (keyKind(e->key)) {
     case IndexKind: {
       e->indexData = indexData;
       e->memSize = e->indexData.size();
 
-      qkey q;
-      int layer;
-      quadKeyUnpack(map->maxLevel(), keyQuad(e->key), q, layer);
+      qkey q = keyQuad(e->key);
+      int layer = keyLayer(e->key);
       int level = log2_int(q) / 2;
 
       int step = map->layer(layer).indexLevelStep();
@@ -713,7 +717,7 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
       assert((e.state == DiskAndMemory || e.state == MemoryOnly) && e.inUse);
         
       qkey q = keyQuad(e.key);
-      Tile tile(q, map->maxLevel());
+      Tile tile(keyLayer(e.key), q);
       QRect r = map->tileToMapRect(tile);
       
       bool inUse = false;
@@ -730,23 +734,18 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
   }
 
 
-  bool Cache::parentIndex(qkey key, qkey &index, qkey &tile)
+  bool Cache::parentIndex(int layer, qkey q, qkey &index, qkey &tile)
   {
-    int layer;
-    qkey q;
-    quadKeyUnpack(map->maxLevel(), key, q, layer);
     int level = log2_int(q) / 2;
-
     if (level == 0) return false;
     
     int step = map->layer(layer).indexLevelStep();
     int idxLevel = ((level - 1) / step) * step;
 
     assert(idxLevel == 0 || idxLevel == 6);
-    qkey qidx = (q & ((1 << (idxLevel * 2)) - 1)) | (1 << (idxLevel * 2));
+    index = (q & ((1 << (idxLevel * 2)) - 1)) | (1 << (idxLevel * 2));
     tile = q >> (idxLevel * 2);
-    
-    index = quadKeyPack(map->maxLevel(), qidx, layer);
+
     return true;
   }
 
@@ -804,8 +803,8 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
   {
     bool present = true;
     foreach (const Tile& tile, tiles) {
-      qkey q = tile.toQuadKey(map->maxLevel());
-      bool tilePresent = requestObject(tileKey(q));
+      qkey q = tile.toQuadKey();
+      bool tilePresent = requestObject(tileKey(tile.layer(), q));
       //if (!tilePresent) { qDebug() << "tile " << tile.x << " " << tile.y << " " << tile.level << " " << 
       //    tileKey(q) << " present " << tilePresent; }
       present = present && tilePresent;
@@ -837,7 +836,7 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
         i++;
       }
 
-      QString url = baseUrl % "/" % map->indexFile(n.qid) % 
+      QString url = baseUrl % "/" % map->indexFile(keyLayer(n.key), n.qid) % 
         ((kind == IndexKind) ? ".idxz" : ".dat");
       QNetworkRequest req;
       req.setUrl(QUrl(url));
@@ -862,15 +861,15 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
   {
     assert(e->state == IndexPending && e->is_linked());
 
+    int layer = keyLayer(e->key);
     qkey q = keyQuad(e->key);
     qkey qidx, qtile;    
     u_int32_t offset, len;
 
     // Ensure the parent index (if any) is loaded
-    if (parentIndex(q, qidx, qtile)) {
-      Key idxKey = indexKey(qidx);
-      //      qDebug() << "qidx " << qidx << " qtile " << qtile << " idxkey " << idxKey  << " file " << 
-        map->indexFile(qidx);
+    if (parentIndex(layer, q, qidx, qtile)) {
+      Key idxKey = indexKey(layer, qidx);
+      //      qDebug() << "qidx " << qidx << " qtile " << qtile << " idxkey " << idxKey  << " file " << map->indexFile(layer, qidx);
 
       requestObject(idxKey);
       Entry *idx = cacheEntries.value(idxKey);
@@ -979,8 +978,7 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
 
 bool Cache::getTile(const Tile &tile, QPixmap &p) const
 {
-  qkey q = tile.toQuadKey(map->maxLevel());
-  Key key = tileKey(q);
+  Key key = tileKey(tile.layer(), tile.toQuadKey());
   if (cacheEntries.contains(key)) {
     Entry *e = cacheEntries.value(key);
     assert(keyKind(e->key) == TileKind);
