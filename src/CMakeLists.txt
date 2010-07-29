@@ -52,6 +52,6 @@ add_executable(merge ${merge_SRCS})
 target_link_libraries(ztopo 
   ${QT_LIBRARIES} qjson ${EXTRA_LIBS} ${QT_QTOPENGL_LIBRARIES}
   ${QT_QTNETWORK_LIBRARIES}
-  /opt/local/lib/libproj.a ${Boost_Libraries} db_cxx)
+  /opt/local/lib/libproj.a ${Boost_Libraries} db)
 target_link_libraries(import ${QT_LIBRARIES} proj ${GDAL_LIBRARY} qjson)
 target_link_libraries(merge ${QT_LIBRARIES} proj qjson)

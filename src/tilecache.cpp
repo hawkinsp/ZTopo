@@ -23,7 +23,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QStringBuilder>
-#include <db_cxx.h>
+#include <db.h>
 #include "tilecache.h"
 #include "consts.h"
 
@@ -104,23 +104,21 @@ namespace Cache {
         QImage tileData;
         if (cache->objectDb) {
           // Do one Get to retrieve the object size, then another to retrieve the object
-          Dbt dbKey(&req.tile, sizeof(Key));
-          Dbt dbData;
-          dbData.set_data(NULL);
-          dbData.set_ulen(0);
-          dbData.set_flags(DB_DBT_USERMEM);
-          try {
-            cache->objectDb->get(NULL, &dbKey, &dbData, 0);
-          }
-          catch (DbMemoryException &e) {
-            // That's what we expected...
-          }
+          DBT dbKey, dbData;
+          memset(&dbKey, 0, sizeof(DBT));
+          memset(&dbData, 0, sizeof(DBT));
+          dbKey.data = &req.tile;
+          dbKey.size = sizeof(Key);
+          dbData.data = NULL;
+          dbData.ulen = 0;
+          dbData.flags = DB_DBT_USERMEM;
+          cache->objectDb->get(cache->objectDb, NULL, &dbKey, &dbData, 0);
 
-          data.resize(dbData.get_size());
-          dbData.set_data(data.data());
-          dbData.set_ulen(dbData.get_size());
-          dbData.set_flags(DB_DBT_USERMEM);
-          int ret = cache->objectDb->get(NULL, &dbKey, &dbData, 0);
+          data.resize(dbData.size);
+          dbData.data = data.data();
+          dbData.ulen = dbData.size;
+          dbData.flags = DB_DBT_USERMEM;
+          int ret = cache->objectDb->get(cache->objectDb, NULL, &dbKey, &dbData, 0);
           if (ret != 0) {
             qWarning() << "Error loading cached object " << req.tile;
             data.clear();
@@ -139,11 +137,16 @@ namespace Cache {
       case SaveObject: {
         //        qDebug() << "saving " << req.tile;
         QByteArray data = req.data.value<QByteArray>();
-        Dbt dbKey(&req.tile, sizeof(Key));
-        Dbt dbData((void *)data.constData(), data.size());
+        DBT dbKey, dbData;
+        memset(&dbKey, 0, sizeof(DBT));
+        memset(&dbData, 0, sizeof(DBT));
+        dbKey.data = &req.tile;
+        dbKey.size = sizeof(Key);
+        dbData.data = (void *)data.constData();
+        dbData.size = data.size();
         int ret = -1;
         if (cache->objectDb) {
-          ret = cache->objectDb->put(NULL, &dbKey, &dbData, 0);
+          ret = cache->objectDb->put(cache->objectDb, NULL, &dbKey, &dbData, 0);
           if (ret != 0) {
             qWarning() << "Cache database put failed with return code " << ret;
           } else {
@@ -157,18 +160,21 @@ namespace Cache {
       case DeleteObject: {
         // qDebug() << "deleting " << req.tile;
         if (cache->objectDb && cache->timestampDb) {
-          Dbt dbKey(&req.tile, sizeof(Key));
-          int ret = cache->objectDb->del(NULL, &dbKey, 0);
+          DBT dbKey;
+          memset(&dbKey, 0, sizeof(DBT));
+          dbKey.data = &req.tile;
+          dbKey.size = sizeof(Key);
+
+          int ret = cache->objectDb->del(cache->objectDb, NULL, &dbKey, 0);
           if (ret != 0) {
             qWarning() << "Cache delete " << req.tile << " failed with return code " 
                        << ret;
           }
-          ret = cache->timestampDb->del(NULL, &dbKey, 0);
+          ret = cache->timestampDb->del(cache->timestampDb, NULL, &dbKey, 0);
           if (ret != 0) {
             qWarning() << "Cache timestamp delete " << req.tile << " failed with return code " 
                        << ret;
           }
-
 
         }      
         break;
@@ -182,12 +188,12 @@ namespace Cache {
       case ClearCache: {
         u_int32_t count;
         if (cache->objectDb) {
-          cache->objectDb->truncate(NULL, &count, 0);
-          cache->objectDb->compact(NULL, NULL, NULL, NULL, DB_FREE_SPACE, NULL);
+          cache->objectDb->truncate(cache->objectDb, NULL, &count, 0);
+          cache->objectDb->compact(cache->objectDb, NULL, NULL, NULL, NULL, DB_FREE_SPACE, NULL);
         }
         if (cache->timestampDb) {
-          cache->timestampDb->truncate(NULL, &count, 0);
-          cache->timestampDb->compact(NULL, NULL, NULL, NULL, DB_FREE_SPACE, NULL);
+          cache->timestampDb->truncate(cache->timestampDb, NULL, &count, 0);
+          cache->timestampDb->compact(cache->timestampDb, NULL, NULL, NULL, NULL, DB_FREE_SPACE, NULL);
         }
         break;
       }
@@ -204,11 +210,17 @@ namespace Cache {
   void IOThread::writeMetadata(Key key, u_int32_t size)
   {
     u_int32_t timeSize[2] = { time(NULL), size };
-    Dbt dbKey(&key, sizeof(Key));
-    Dbt dbData(&timeSize, sizeof(timeSize));
+    DBT dbKey, dbData;
+    memset(&dbKey, 0, sizeof(DBT));
+    memset(&dbData, 0, sizeof(DBT));
+    dbKey.data = &key;
+    dbKey.size = sizeof(Key);
+    dbData.data = &timeSize;
+    dbData.size = sizeof(timeSize);
+
     int ret = -1;
     if (cache->timestampDb) {
-      ret = cache->timestampDb->put(NULL, &dbKey, &dbData, 0);
+      ret = cache->timestampDb->put(cache->timestampDb, NULL, &dbKey, &dbData, 0);
       if (ret != 0) {
         qWarning() << "Timestamp put failed with return code " << ret;
       }
@@ -222,34 +234,37 @@ namespace Cache {
       diskCacheHits(0), diskCacheMisses(0), memCacheHits(0), memCacheMisses(0), numNetworkReqs(0),
       networkReqSize(0), dbEnv(NULL), objectDb(NULL), timestampDb(NULL)
   {
-    try {
-      u_int32_t envFlags = DB_CREATE | DB_INIT_MPOOL;
-      dbEnv = new DbEnv(0);
-      dbEnv->open(cachePath.path().toLatin1().data(), envFlags, 0);
-      
-      objectDb = new Db(dbEnv, 0);
-      timestampDb = new Db(dbEnv, 0);
-      
+    do {
       u_int32_t dbFlags = DB_CREATE;
       QString objectDbName = map->id() % ".db";
       QString timestampDbName = map->id() % "-timestamp.db";
-      objectDb->open(NULL, objectDbName.toLatin1().data(), NULL, DB_BTREE, dbFlags, 0);
-      timestampDb->open(NULL, timestampDbName.toLatin1().data(), NULL, DB_BTREE, 
-                        dbFlags, 0);
       
-    } catch (DbException &e) {
-      if (timestampDb) { delete timestampDb; timestampDb = NULL; }
-      if (objectDb) { delete objectDb; objectDb = NULL; }
-      if (dbEnv) { delete dbEnv; dbEnv = NULL; }
+      u_int32_t envFlags = DB_CREATE | DB_INIT_MPOOL;
+      int ret = db_env_create(&dbEnv, 0);
+      if (ret != 0) goto dberror;
+      ret = dbEnv->open(dbEnv, cachePath.path().toLatin1().data(), envFlags, 0);
+      if (ret != 0) goto dberror;
+      ret = db_create(&objectDb, dbEnv, 0);
+      if (ret != 0) goto dberror;
+      ret = db_create(&timestampDb, dbEnv, 0);
+      if (ret != 0) goto dberror;
+      
+      ret = objectDb->open(objectDb, NULL, objectDbName.toLatin1().data(), NULL, DB_BTREE, dbFlags, 0);
+      if (ret != 0) goto dberror;
+      ret = timestampDb->open(timestampDb, NULL, timestampDbName.toLatin1().data(), NULL, DB_BTREE, 
+                              dbFlags, 0);
+      if (ret != 0) goto dberror;
+      
+      break;
+
+    dberror:
+
+      if (timestampDb) { timestampDb->close(timestampDb, 0); timestampDb = NULL; }
+      if (objectDb) { objectDb->close(objectDb, 0); objectDb = NULL; }
+      if (dbEnv) { dbEnv->close(dbEnv, 0); dbEnv = NULL; }
       qWarning("Database exception opening tile cache environment %s", 
                cachePath.path().toLatin1().data());
-    } catch (std::exception &e) {
-      if (timestampDb) { delete timestampDb; timestampDb = NULL; }
-      if (objectDb) { delete objectDb; objectDb = NULL; }
-      if (dbEnv) { delete dbEnv; dbEnv = NULL; }
-      qWarning("Database exception opening tile cache environment %s", 
-               cachePath.path().toLatin1().data());
-    }
+    } while (false);
     
     initializeCacheFromDatabase();
     
@@ -299,17 +314,9 @@ namespace Cache {
     cacheEntries.clear();
     
     // Close databases
-    try {
-      if (objectDb)    { objectDb->close(0);    delete objectDb; }
-      if (timestampDb) { timestampDb->close(0); delete timestampDb; }
-      if (dbEnv)       { dbEnv->close(0);       delete dbEnv; }
-    } catch (DbException &e) {
-      qWarning() << "Database exception closing tile cache";
-      delete dbEnv;
-    } catch (std::exception &e) {
-      qWarning() << "IO exception closing tile cache";
-      delete dbEnv;
-    }
+    if (objectDb)    { objectDb->close(objectDb, 0); }
+    if (timestampDb) { timestampDb->close(timestampDb, 0); }
+    if (dbEnv)       { dbEnv->close(dbEnv, 0); }
   }
   
   void Cache::setCacheSizes(int mem, int disk) {
@@ -323,53 +330,39 @@ namespace Cache {
   {
     if (!objectDb || !timestampDb) return;
     
-    Dbc *cursor;
-    Dbt key, data;
+    DBC *cursor = NULL;
+    DBT key, data;
     Key q;
     int ret;
+
+    memset(&key, 0, sizeof(key));
+    memset(&data, 0, sizeof(data));
     
-    // Read objects
-    /*    objectDb->cursor(NULL, &cursor, 0);
-    if (!cursor) {
-      qWarning() << "objectDb.cursor() failed";
-      return;
-    }
-    
-    key.set_data(&q);
-    key.set_ulen(sizeof(Key));
-    key.set_flags(DB_DBT_USERMEM);
-    data.set_data(NULL);
-    data.set_ulen(0);
-    while ((ret = cursor->get(&key, &data, DB_NEXT)) == 0) {
-      assert(key.get_size() == sizeof(Key));
-    }
-    cursor->close();
-    */
     // Read timestamps to get LRU order
-    timestampDb->cursor(NULL, &cursor, 0);
+    timestampDb->cursor(timestampDb, NULL, &cursor, 0);
     if (!cursor) {
       qWarning() << "timestampDb.cursor() failed";
       return;
     }
     
     u_int32_t timeSize[2];
-    key.set_data(&q);
-    key.set_ulen(sizeof(Key));
-    key.set_flags(DB_DBT_USERMEM);
-    data.set_data(&timeSize);
-    data.set_ulen(sizeof(timeSize));
-    data.set_flags(DB_DBT_USERMEM);
+    key.data = &q;
+    key.ulen = sizeof(Key);
+    key.flags = DB_DBT_USERMEM;
+    data.data = &timeSize;
+    data.ulen = sizeof(timeSize);
+    data.flags = DB_DBT_USERMEM;
     
     QVector<EntryTime> tiletimes;
-    while ((ret = cursor->get(&key, &data, DB_NEXT)) == 0) {
-      assert(key.get_size() == sizeof(Key) && data.get_size() == sizeof(timeSize)); 
+    while ((ret = cursor->get(cursor, &key, &data, DB_NEXT)) == 0) {
+      assert(key.size == sizeof(Key) && data.size == sizeof(timeSize)); 
       Entry *e = new Entry(q);
       e->diskSize = timeSize[1];
       e->state = Disk;
       cacheEntries[q] = e;
       tiletimes << EntryTime(timeSize[0], q);
     }
-    cursor->close();
+    cursor->close(cursor);
     qSort(tiletimes);
     foreach (const EntryTime &t, tiletimes) {
       q = t.second;

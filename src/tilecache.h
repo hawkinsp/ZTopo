@@ -35,11 +35,11 @@
 #include <QThread>
 #include <QVariant>
 #include <QWaitCondition>
+#include <db.h>
 #include "map.h"
 
 class QNetworkReply;
-class DbEnv;
-class Db;
+
 
 namespace Cache {
   using namespace boost::intrusive;
@@ -208,8 +208,8 @@ private:
   Map *map;
   QDir cachePath;
 
-  DbEnv *dbEnv;
-  Db *timestampDb, *objectDb;
+  DB_ENV *dbEnv;
+  DB *timestampDb, *objectDb;
 
   QNetworkAccessManager manager;
 
