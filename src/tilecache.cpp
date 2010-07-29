@@ -64,7 +64,7 @@ namespace Cache {
   }
   
   Entry::Entry(Key aKey) 
-    : key(aKey), memSize(0), diskSize(0), pixmap(NULL), indexData(NULL),
+    : key(aKey), pixmap(NULL), indexData(NULL), memSize(0), diskSize(0),
       state(Invalid), inUse(false)
   {
   }
@@ -76,7 +76,7 @@ namespace Cache {
 
 
   NetworkRequest::NetworkRequest(Key k, qkey q, u_int32_t off, u_int32_t l)
-    : key(k), qid(q), offset(off), len(l)
+    : qid(q), offset(off), len(l), key(k) 
   {
   }
   
@@ -229,10 +229,11 @@ namespace Cache {
   
   
   Cache::Cache(Map *m, int maxMem, int maxDisk, const QString &cp)
-    : map(m), cachePath(cp), manager(this), maxMemCache(maxMem), 
-      maxDiskCache(maxDisk), memLRUSize(0), diskLRUSize(0),
+    : map(m), cachePath(cp), dbEnv(NULL), timestampDb(NULL), objectDb(NULL),
+      manager(this), maxMemCache(maxMem), 
+      maxDiskCache(maxDisk),  diskLRUSize(0), memLRUSize(0),
       diskCacheHits(0), diskCacheMisses(0), memCacheHits(0), memCacheMisses(0), numNetworkReqs(0),
-      networkReqSize(0), dbEnv(NULL), objectDb(NULL), timestampDb(NULL)
+      networkReqSize(0)
   {
     do {
       u_int32_t dbFlags = DB_CREATE;
@@ -446,7 +447,6 @@ namespace Cache {
   
   void Cache::purgeMemLRU()
   {
-    time_t tm = time(NULL);
     while (memLRUSize > ((unsigned int)maxMemCache) * bytesPerMb) {
       assert(!memLRU.empty());
       Entry &e = memLRU.front();
@@ -497,7 +497,6 @@ namespace Cache {
 
       qkey q = keyQuad(e->key);
       int layer = keyLayer(e->key);
-      int level = log2_int(q) / 2;
 
       int numLevels = map->indexNumLevels(layer, q);
 
@@ -523,7 +522,9 @@ namespace Cache {
       return true;
     }
 
-    default: qFatal("Unknown kind in decompressObject");
+    default: 
+      qFatal("Unknown kind in decompressObject");
+      return false; // Shut up gcc warning
     }
   }
 
@@ -604,6 +605,8 @@ namespace Cache {
           delete e;
         }
         break;
+
+      default: qFatal("Invalid object state in network event");
       }
 
       if (ok) {
@@ -752,7 +755,7 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
 
     u_int32_t *idxData = (u_int32_t *)e->indexData.constData();
     int idxLen = e->indexData.size() / 4;
-    qkey q0 = q;
+
     // Find the start of the tree for the tile level of q
     int level = log2_int(q) / 2;
     int base = 0;

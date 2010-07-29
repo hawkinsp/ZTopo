@@ -42,7 +42,7 @@ Tile::Tile(int vx, int vy, int vlevel, int vlayer)
 } 
 
 Tile::Tile(int l, const QString &quad)
-  : fx(0), fy(0), flayer(l), flevel(quad.length())
+  : fx(0), fy(0), flevel(quad.length()), flayer(l)
 {
   for (int i = flevel; i > 0; i--) {
     int mask = 1 << (i - 1);
@@ -177,7 +177,7 @@ Map::Map(const QString &aId, const QString &aName, const QUrl &aBaseUrl, Datum d
   baseTileSz = 1 << logBaseTileSz;
   vMaxLevel = logSize - logBaseTileSz;
 
-  if (maxLevel() * 2 + 1 + log2_int(numLayers()) > sizeof(qkey) * 8) {
+  if (maxLevel() * 2 + 1 + log2_int(numLayers()) > int(sizeof(qkey)) * 8) {
     qFatal("Cannot pack %d levels and %d layers in %d bytes", maxLevel(), numLayers(), int(sizeof(qkey)));
   }
 

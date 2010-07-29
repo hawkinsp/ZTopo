@@ -7,6 +7,7 @@ find_package(BerkeleyDB REQUIRED)
 find_package(Boost 1.36 REQUIRED)
 find_package(GDAL REQUIRED)
 
+SET(CMAKE_CXX_FLAGS "-Wall")
 
 include_directories (${Boost_INCLUDE_DIRS})
 include_directories(${QT_QTOPENGL_INCLUDE_DIR})
