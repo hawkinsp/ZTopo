@@ -20,6 +20,7 @@
 #ifndef TILECACHE_H 
 #define TILECACHE_H 1
 
+#include <stdint.h>
 #include <time.h>
 #include <boost/intrusive/list.hpp>
 #include <QDir>
@@ -46,7 +47,7 @@ namespace Cache {
 
   // Cache database keys are 64-bit values; the top byte indicates the kind of
   // object (index or tile).
-  typedef u_int64_t Key;
+  typedef uint64_t Key;
   
   enum Kind {
     TileKind = 0,
@@ -125,17 +126,17 @@ namespace Cache {
   private:
     Cache *cache;
 
-    void writeMetadata(Key key, u_int32_t size);
+    void writeMetadata(Key key, uint32_t size);
     
   signals:
     void objectSavedToDisk(Key key, bool success);
   };
   
   struct NetworkRequest {
-    NetworkRequest(Key key, qkey q, u_int32_t off, u_int32_t len);
+    NetworkRequest(Key key, qkey q, uint32_t off, uint32_t len);
     
     qkey qid; // Index object
-    u_int32_t offset, len;
+    uint32_t offset, len;
     Key key;  // Requested object
 
     bool operator<  (const NetworkRequest& other) const {
@@ -259,7 +260,7 @@ private:
   // Returns true if there is a parent index, false if q is the top-level index.
   bool parentIndex(int layer, qkey q, qkey &idx, qkey &tile);
 
-  void findTileRange(qkey q, Entry *idx, u_int32_t &offset, u_int32_t &len);
+  void findTileRange(qkey q, Entry *idx, uint32_t &offset, uint32_t &len);
 
   // Request an object. Returns true if the object is present in memory right now.
   bool requestObject(const Key key);

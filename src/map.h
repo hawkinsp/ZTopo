@@ -28,7 +28,7 @@
 #include <QTransform>
 #include <QUrl>
 #include <QVector>
-
+#include <stdint.h>
 #include "projection.h"
 
 static const int tileDirectoryChunk = 3;
@@ -39,7 +39,7 @@ int log2_int(int x);
 // x, y, level tuple packed as an integer
 // Layout:
 // 001YXYXYXYX
-typedef u_int32_t qkey;
+typedef uint32_t qkey;
 
 // Tile coordinates
 class Tile {

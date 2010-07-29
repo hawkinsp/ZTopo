@@ -38,7 +38,7 @@ static const QNetworkRequest::Attribute keyAttr(QNetworkRequest::User);
 
 
 namespace Cache {
-  typedef QPair<Key, u_int32_t> NetworkReqKey;
+  typedef QPair<Key, uint32_t> NetworkReqKey;
 
   static const int kindShift = 56;
   static const int layerShift = 48;
@@ -75,7 +75,7 @@ namespace Cache {
   }
 
 
-  NetworkRequest::NetworkRequest(Key k, qkey q, u_int32_t off, u_int32_t l)
+  NetworkRequest::NetworkRequest(Key k, qkey q, uint32_t off, uint32_t l)
     : key(k), qid(q), offset(off), len(l)
   {
   }
@@ -180,7 +180,7 @@ namespace Cache {
       }
 
       case ClearCache: {
-        u_int32_t count;
+        uint32_t count;
         if (cache->objectDb) {
           cache->objectDb->truncate(NULL, &count, 0);
           cache->objectDb->compact(NULL, NULL, NULL, NULL, DB_FREE_SPACE, NULL);
@@ -201,9 +201,9 @@ namespace Cache {
     }
   }
 
-  void IOThread::writeMetadata(Key key, u_int32_t size)
+  void IOThread::writeMetadata(Key key, uint32_t size)
   {
-    u_int32_t timeSize[2] = { time(NULL), size };
+    uint32_t timeSize[2] = { time(NULL), size };
     Dbt dbKey(&key, sizeof(Key));
     Dbt dbData(&timeSize, sizeof(timeSize));
     int ret = -1;
@@ -223,14 +223,14 @@ namespace Cache {
       networkReqSize(0), dbEnv(NULL), objectDb(NULL), timestampDb(NULL)
   {
     try {
-      u_int32_t envFlags = DB_CREATE | DB_INIT_MPOOL;
+      uint32_t envFlags = DB_CREATE | DB_INIT_MPOOL;
       dbEnv = new DbEnv(0);
       dbEnv->open(cachePath.path().toLatin1().data(), envFlags, 0);
       
       objectDb = new Db(dbEnv, 0);
       timestampDb = new Db(dbEnv, 0);
       
-      u_int32_t dbFlags = DB_CREATE;
+      uint32_t dbFlags = DB_CREATE;
       QString objectDbName = map->id() % ".db";
       QString timestampDbName = map->id() % "-timestamp.db";
       objectDb->open(NULL, objectDbName.toLatin1().data(), NULL, DB_BTREE, dbFlags, 0);
@@ -318,7 +318,7 @@ namespace Cache {
     purgeMemLRU();
   }
   
-  typedef QPair<u_int32_t, Key> EntryTime;
+  typedef QPair<uint32_t, Key> EntryTime;
   void Cache::initializeCacheFromDatabase()
   {
     if (!objectDb || !timestampDb) return;
@@ -352,7 +352,7 @@ namespace Cache {
       return;
     }
     
-    u_int32_t timeSize[2];
+    uint32_t timeSize[2];
     key.set_data(&q);
     key.set_ulen(sizeof(Key));
     key.set_flags(DB_DBT_USERMEM);
@@ -750,9 +750,9 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
   }
 
 
-  inline int tileSize(u_int32_t *data, int off, int len) {
+  inline int tileSize(uint32_t *data, int off, int len) {
     assert(off < len);
-    u_int32_t ret = data[off];
+    uint32_t ret = data[off];
     
     off = 4 * (off + 1);
     if (off + 4 <= len) {
@@ -763,9 +763,9 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
     return ret;
   }
   
-  void Cache::findTileRange(qkey q, Entry *e, u_int32_t &offset, u_int32_t &len)
+  void Cache::findTileRange(qkey q, Entry *e, uint32_t &offset, uint32_t &len)
   {
-    u_int32_t *data = (u_int32_t *)e->indexData.constData();
+    uint32_t *data = (uint32_t *)e->indexData.constData();
     if (e->indexData.isEmpty()) {
       // Dummy index
       offset = 0;
@@ -824,13 +824,13 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
 
       qkey qid = n.qid;
       Kind kind = keyKind(n.key);
-      u_int32_t offset = n.offset;
+      uint32_t offset = n.offset;
 
       QList<NetworkReqKey> *bundle = new QList<NetworkReqKey>();
       while (i < networkRequests.size() && keyKind(networkRequests[i].key) == kind &&
              networkRequests[i].qid == qid &&
              networkRequests[i].offset == offset) {
-        u_int32_t len = networkRequests[i].len;
+        uint32_t len = networkRequests[i].len;
         *bundle << NetworkReqKey(networkRequests[i].key, len);
         offset += len;
         i++;
@@ -864,7 +864,7 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
     int layer = keyLayer(e->key);
     qkey q = keyQuad(e->key);
     qkey qidx, qtile;    
-    u_int32_t offset, len;
+    uint32_t offset, len;
 
     // Ensure the parent index (if any) is loaded
     if (parentIndex(layer, q, qidx, qtile)) {
