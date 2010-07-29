@@ -255,9 +255,6 @@ private:
   // Save the disk cache index
   void initializeCacheFromDatabase();
 
-  // Given a layer and tile, identify the index and tile number within that index.
-  // Returns true if there is a parent index, false if q is the top-level index.
-  bool parentIndex(int layer, qkey q, qkey &idx, qkey &tile);
 
   void findTileRange(qkey q, Entry *idx, u_int32_t &offset, u_int32_t &len);
 

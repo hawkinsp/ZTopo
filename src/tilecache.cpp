@@ -506,17 +506,18 @@ namespace Cache {
       int layer = keyLayer(e->key);
       int level = log2_int(q) / 2;
 
-      int step = map->layer(layer).indexLevelStep();
-      assert(level % step == 0);
+      int numLevels = map->indexNumLevels(layer, q);
 
-      int maxLevel = std::min(level + step, map->layer(layer).maxLevel());
+      int size = 0;
+      for (int i = 1; i <= numLevels; i++) {
+        // The formula sums the series 4 * (4^0 + 4^1 + 4^2 + 4^3 + ...) which is the size
+        // in bytes of a complete 4-way tree without a root node of 32-bit integers.
+        // See the online encyclopedia of integer sequences :-)
+        size += (((1 << (2 * (i + 2))) - 1) / 3 - 1);
+      }
+      //      qDebug() << "got index size " << e->indexData.size() << " expected " << size << " levels " << numLevels;
 
-      // The formula sums the series 4 * (4^1 + 4^2 + 4^3 + ...) which is the size
-      // in bytes of a complete 4-way tree without a root node of 32-bit integers.
-      // See the online encyclopedia of integer sequences :-)
-      if (e->indexData.size() !=
-             (((1 << (2 * (maxLevel - level + 2))) - 1) / 3 - 5))
-        return false;
+      if (e->indexData.size() != size) return false;
 
       return true;
     }
@@ -734,22 +735,6 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
   }
 
 
-  bool Cache::parentIndex(int layer, qkey q, qkey &index, qkey &tile)
-  {
-    int level = log2_int(q) / 2;
-    if (level == 0) return false;
-    
-    int step = map->layer(layer).indexLevelStep();
-    int idxLevel = ((level - 1) / step) * step;
-
-    assert(idxLevel == 0 || idxLevel == 6);
-    index = (q & ((1 << (idxLevel * 2)) - 1)) | (1 << (idxLevel * 2));
-    tile = q >> (idxLevel * 2);
-
-    return true;
-  }
-
-
   inline int tileSize(u_int32_t *data, int off, int len) {
     assert(off < len);
     u_int32_t ret = data[off];
@@ -765,38 +750,49 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
   
   void Cache::findTileRange(qkey q, Entry *e, u_int32_t &offset, u_int32_t &len)
   {
-    u_int32_t *data = (u_int32_t *)e->indexData.constData();
     if (e->indexData.isEmpty()) {
       // Dummy index
       offset = 0;
       len = 0;
       return;
     }
-    int datalen = e->indexData.size() / 4;
-    
+
+    u_int32_t *idxData = (u_int32_t *)e->indexData.constData();
+    int idxLen = e->indexData.size() / 4;
+    qkey q0 = q;
+    // Find the start of the tree for the tile level of q
+    int level = log2_int(q) / 2;
+    int base = 0;
     offset = 0;
-    int pos = 0;
+    for (int i = 1; i < level; i++) {
+      assert(base < idxLen);
+      offset += idxData[base];
+      // base += (4^0 + 4^2 + ... + 4^i)
+      base += (((1 << (2 * (i + 1))) - 1) / 3);
+    }
+   
+    //qDebug() << "tree base " << base << " offset  " << offset;
+    int pos = 1;
     // For all levels except the last one...
-    while (q > 7) {
+    for (int l = 1; l <= level - 1; l++) {
+      assert(base + pos + 4 <= idxLen);
       int digit = q & 3;
-      int i;
-      for (i = 0; i < digit; i++) {
-        offset += data[pos + i];
-      }
-      for (; i < 4; i++) {
-        offset += tileSize(data, pos + i, datalen);
+      for (int i = 0; i < digit; i++) {
+        offset += idxData[base + pos + i];
       }
       
       q >>= 2;
-      pos = 4 * (pos + digit + 1);
+      pos = 4 * (pos + digit) + 1;
     }
     
+    assert(base + pos + 4 <= idxLen);
     // The last level
     int digit = q & 3;
     for (int i = 0; i < digit; i++) {
-      offset += tileSize(data, pos + i, datalen);
+      offset += idxData[base + pos + i];
     }
-    len = tileSize(data, pos + digit, datalen);
+    len = idxData[base + pos + digit];
+    /* qDebug() << "q " << q0 << " " <<Tile(keyLayer(e->key), q0).toQuadKeyString() << " level " << level << " offset " << offset << " len " << len << " pos " << pos << " digit " << digit;*/
   }
 
   bool Cache::requestTiles(const QList<Tile> &tiles)
@@ -867,7 +863,7 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
     u_int32_t offset, len;
 
     // Ensure the parent index (if any) is loaded
-    if (parentIndex(layer, q, qidx, qtile)) {
+    if (map->parentIndex(layer, q, qidx, qtile)) {
       Key idxKey = indexKey(layer, qidx);
       //      qDebug() << "qidx " << qidx << " qtile " << qtile << " idxkey " << idxKey  << " file " << map->indexFile(layer, qidx);
 

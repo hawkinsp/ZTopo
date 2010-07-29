@@ -169,9 +169,11 @@ public:
   const Layer &layer(int id) const { return layers[id]; }
   bool layerById(QString name, int &layer) const;
 
-  // Split a quad key into an index quad key and a tile quad key
-  bool parentIndex(qkey key, qkey &index, qkey &tile) const;
-  int indexNumLevels(qkey index) const;
+  // Given a layer and tile, identify the index and tile number within that index.
+  // Returns true if there is a parent index, false if q is the top-level index.
+  bool parentIndex(int layer, qkey q, qkey &idx, qkey &tile) const;
+
+  int indexNumLevels(int layer, qkey index) const;
 
 
   //  Tile quadKeyToTile(int layer, QString quadKey) const;
