@@ -17,13 +17,14 @@
   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include <stdint.h>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QFileInfo>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QStringBuilder>
-#include <db_cxx.h>
+#include <db.h>
 #include "tilecache.h"
 #include "consts.h"
 
@@ -64,7 +65,7 @@ namespace Cache {
   }
   
   Entry::Entry(Key aKey) 
-    : key(aKey), memSize(0), diskSize(0), pixmap(NULL), indexData(NULL),
+    : key(aKey), pixmap(NULL), indexData(NULL), memSize(0), diskSize(0),
       state(Invalid), inUse(false)
   {
   }
@@ -76,7 +77,7 @@ namespace Cache {
 
 
   NetworkRequest::NetworkRequest(Key k, qkey q, uint32_t off, uint32_t l)
-    : key(k), qid(q), offset(off), len(l)
+    : qid(q), offset(off), len(l), key(k) 
   {
   }
   
@@ -104,23 +105,21 @@ namespace Cache {
         QImage tileData;
         if (cache->objectDb) {
           // Do one Get to retrieve the object size, then another to retrieve the object
-          Dbt dbKey(&req.tile, sizeof(Key));
-          Dbt dbData;
-          dbData.set_data(NULL);
-          dbData.set_ulen(0);
-          dbData.set_flags(DB_DBT_USERMEM);
-          try {
-            cache->objectDb->get(NULL, &dbKey, &dbData, 0);
-          }
-          catch (DbMemoryException &e) {
-            // That's what we expected...
-          }
+          DBT dbKey, dbData;
+          memset(&dbKey, 0, sizeof(DBT));
+          memset(&dbData, 0, sizeof(DBT));
+          dbKey.data = &req.tile;
+          dbKey.size = sizeof(Key);
+          dbData.data = NULL;
+          dbData.ulen = 0;
+          dbData.flags = DB_DBT_USERMEM;
+          cache->objectDb->get(cache->objectDb, NULL, &dbKey, &dbData, 0);
 
-          data.resize(dbData.get_size());
-          dbData.set_data(data.data());
-          dbData.set_ulen(dbData.get_size());
-          dbData.set_flags(DB_DBT_USERMEM);
-          int ret = cache->objectDb->get(NULL, &dbKey, &dbData, 0);
+          data.resize(dbData.size);
+          dbData.data = data.data();
+          dbData.ulen = dbData.size;
+          dbData.flags = DB_DBT_USERMEM;
+          int ret = cache->objectDb->get(cache->objectDb, NULL, &dbKey, &dbData, 0);
           if (ret != 0) {
             qWarning() << "Error loading cached object " << req.tile;
             data.clear();
@@ -139,11 +138,16 @@ namespace Cache {
       case SaveObject: {
         //        qDebug() << "saving " << req.tile;
         QByteArray data = req.data.value<QByteArray>();
-        Dbt dbKey(&req.tile, sizeof(Key));
-        Dbt dbData((void *)data.constData(), data.size());
+        DBT dbKey, dbData;
+        memset(&dbKey, 0, sizeof(DBT));
+        memset(&dbData, 0, sizeof(DBT));
+        dbKey.data = &req.tile;
+        dbKey.size = sizeof(Key);
+        dbData.data = (void *)data.constData();
+        dbData.size = data.size();
         int ret = -1;
         if (cache->objectDb) {
-          ret = cache->objectDb->put(NULL, &dbKey, &dbData, 0);
+          ret = cache->objectDb->put(cache->objectDb, NULL, &dbKey, &dbData, 0);
           if (ret != 0) {
             qWarning() << "Cache database put failed with return code " << ret;
           } else {
@@ -157,18 +161,21 @@ namespace Cache {
       case DeleteObject: {
         // qDebug() << "deleting " << req.tile;
         if (cache->objectDb && cache->timestampDb) {
-          Dbt dbKey(&req.tile, sizeof(Key));
-          int ret = cache->objectDb->del(NULL, &dbKey, 0);
+          DBT dbKey;
+          memset(&dbKey, 0, sizeof(DBT));
+          dbKey.data = &req.tile;
+          dbKey.size = sizeof(Key);
+
+          int ret = cache->objectDb->del(cache->objectDb, NULL, &dbKey, 0);
           if (ret != 0) {
             qWarning() << "Cache delete " << req.tile << " failed with return code " 
                        << ret;
           }
-          ret = cache->timestampDb->del(NULL, &dbKey, 0);
+          ret = cache->timestampDb->del(cache->timestampDb, NULL, &dbKey, 0);
           if (ret != 0) {
             qWarning() << "Cache timestamp delete " << req.tile << " failed with return code " 
                        << ret;
           }
-
 
         }      
         break;
@@ -182,12 +189,12 @@ namespace Cache {
       case ClearCache: {
         uint32_t count;
         if (cache->objectDb) {
-          cache->objectDb->truncate(NULL, &count, 0);
-          cache->objectDb->compact(NULL, NULL, NULL, NULL, DB_FREE_SPACE, NULL);
+          cache->objectDb->truncate(cache->objectDb, NULL, &count, 0);
+          cache->objectDb->compact(cache->objectDb, NULL, NULL, NULL, NULL, DB_FREE_SPACE, NULL);
         }
         if (cache->timestampDb) {
-          cache->timestampDb->truncate(NULL, &count, 0);
-          cache->timestampDb->compact(NULL, NULL, NULL, NULL, DB_FREE_SPACE, NULL);
+          cache->timestampDb->truncate(cache->timestampDb, NULL, &count, 0);
+          cache->timestampDb->compact(cache->timestampDb, NULL, NULL, NULL, NULL, DB_FREE_SPACE, NULL);
         }
         break;
       }
@@ -204,11 +211,17 @@ namespace Cache {
   void IOThread::writeMetadata(Key key, uint32_t size)
   {
     uint32_t timeSize[2] = { time(NULL), size };
-    Dbt dbKey(&key, sizeof(Key));
-    Dbt dbData(&timeSize, sizeof(timeSize));
+    DBT dbKey, dbData;
+    memset(&dbKey, 0, sizeof(DBT));
+    memset(&dbData, 0, sizeof(DBT));
+    dbKey.data = &key;
+    dbKey.size = sizeof(Key);
+    dbData.data = &timeSize;
+    dbData.size = sizeof(timeSize);
+
     int ret = -1;
     if (cache->timestampDb) {
-      ret = cache->timestampDb->put(NULL, &dbKey, &dbData, 0);
+      ret = cache->timestampDb->put(cache->timestampDb, NULL, &dbKey, &dbData, 0);
       if (ret != 0) {
         qWarning() << "Timestamp put failed with return code " << ret;
       }
@@ -217,39 +230,43 @@ namespace Cache {
   
   
   Cache::Cache(Map *m, int maxMem, int maxDisk, const QString &cp)
-    : map(m), cachePath(cp), manager(this), maxMemCache(maxMem), 
-      maxDiskCache(maxDisk), memLRUSize(0), diskLRUSize(0),
+    : map(m), cachePath(cp), dbEnv(NULL), timestampDb(NULL), objectDb(NULL),
+      manager(this), maxMemCache(maxMem), 
+      maxDiskCache(maxDisk),  diskLRUSize(0), memLRUSize(0),
       diskCacheHits(0), diskCacheMisses(0), memCacheHits(0), memCacheMisses(0), numNetworkReqs(0),
-      networkReqSize(0), dbEnv(NULL), objectDb(NULL), timestampDb(NULL)
+      networkReqSize(0)
   {
-    try {
-      uint32_t envFlags = DB_CREATE | DB_INIT_MPOOL;
-      dbEnv = new DbEnv(0);
-      dbEnv->open(cachePath.path().toLatin1().data(), envFlags, 0);
-      
-      objectDb = new Db(dbEnv, 0);
-      timestampDb = new Db(dbEnv, 0);
-      
+    do {
       uint32_t dbFlags = DB_CREATE;
       QString objectDbName = map->id() % ".db";
       QString timestampDbName = map->id() % "-timestamp.db";
-      objectDb->open(NULL, objectDbName.toLatin1().data(), NULL, DB_BTREE, dbFlags, 0);
-      timestampDb->open(NULL, timestampDbName.toLatin1().data(), NULL, DB_BTREE, 
-                        dbFlags, 0);
       
-    } catch (DbException &e) {
-      if (timestampDb) { delete timestampDb; timestampDb = NULL; }
-      if (objectDb) { delete objectDb; objectDb = NULL; }
-      if (dbEnv) { delete dbEnv; dbEnv = NULL; }
+      uint32_t envFlags = DB_CREATE | DB_INIT_MPOOL;
+      int ret = db_env_create(&dbEnv, 0);
+      if (ret != 0) goto dberror;
+      ret = dbEnv->open(dbEnv, cachePath.path().toLatin1().data(), envFlags, 0);
+      if (ret != 0) goto dberror;
+      ret = db_create(&objectDb, dbEnv, 0);
+      if (ret != 0) goto dberror;
+      ret = db_create(&timestampDb, dbEnv, 0);
+      if (ret != 0) goto dberror;
+      
+      ret = objectDb->open(objectDb, NULL, objectDbName.toLatin1().data(), NULL, DB_BTREE, dbFlags, 0);
+      if (ret != 0) goto dberror;
+      ret = timestampDb->open(timestampDb, NULL, timestampDbName.toLatin1().data(), NULL, DB_BTREE, 
+                              dbFlags, 0);
+      if (ret != 0) goto dberror;
+      
+      break;
+
+    dberror:
+
+      if (timestampDb) { timestampDb->close(timestampDb, 0); timestampDb = NULL; }
+      if (objectDb) { objectDb->close(objectDb, 0); objectDb = NULL; }
+      if (dbEnv) { dbEnv->close(dbEnv, 0); dbEnv = NULL; }
       qWarning("Database exception opening tile cache environment %s", 
                cachePath.path().toLatin1().data());
-    } catch (std::exception &e) {
-      if (timestampDb) { delete timestampDb; timestampDb = NULL; }
-      if (objectDb) { delete objectDb; objectDb = NULL; }
-      if (dbEnv) { delete dbEnv; dbEnv = NULL; }
-      qWarning("Database exception opening tile cache environment %s", 
-               cachePath.path().toLatin1().data());
-    }
+    } while (false);
     
     initializeCacheFromDatabase();
     
@@ -299,17 +316,9 @@ namespace Cache {
     cacheEntries.clear();
     
     // Close databases
-    try {
-      if (objectDb)    { objectDb->close(0);    delete objectDb; }
-      if (timestampDb) { timestampDb->close(0); delete timestampDb; }
-      if (dbEnv)       { dbEnv->close(0);       delete dbEnv; }
-    } catch (DbException &e) {
-      qWarning() << "Database exception closing tile cache";
-      delete dbEnv;
-    } catch (std::exception &e) {
-      qWarning() << "IO exception closing tile cache";
-      delete dbEnv;
-    }
+    if (objectDb)    { objectDb->close(objectDb, 0); }
+    if (timestampDb) { timestampDb->close(timestampDb, 0); }
+    if (dbEnv)       { dbEnv->close(dbEnv, 0); }
   }
   
   void Cache::setCacheSizes(int mem, int disk) {
@@ -323,53 +332,39 @@ namespace Cache {
   {
     if (!objectDb || !timestampDb) return;
     
-    Dbc *cursor;
-    Dbt key, data;
+    DBC *cursor = NULL;
+    DBT key, data;
     Key q;
     int ret;
+
+    memset(&key, 0, sizeof(key));
+    memset(&data, 0, sizeof(data));
     
-    // Read objects
-    /*    objectDb->cursor(NULL, &cursor, 0);
-    if (!cursor) {
-      qWarning() << "objectDb.cursor() failed";
-      return;
-    }
-    
-    key.set_data(&q);
-    key.set_ulen(sizeof(Key));
-    key.set_flags(DB_DBT_USERMEM);
-    data.set_data(NULL);
-    data.set_ulen(0);
-    while ((ret = cursor->get(&key, &data, DB_NEXT)) == 0) {
-      assert(key.get_size() == sizeof(Key));
-    }
-    cursor->close();
-    */
     // Read timestamps to get LRU order
-    timestampDb->cursor(NULL, &cursor, 0);
+    timestampDb->cursor(timestampDb, NULL, &cursor, 0);
     if (!cursor) {
       qWarning() << "timestampDb.cursor() failed";
       return;
     }
     
     uint32_t timeSize[2];
-    key.set_data(&q);
-    key.set_ulen(sizeof(Key));
-    key.set_flags(DB_DBT_USERMEM);
-    data.set_data(&timeSize);
-    data.set_ulen(sizeof(timeSize));
-    data.set_flags(DB_DBT_USERMEM);
+    key.data = &q;
+    key.ulen = sizeof(Key);
+    key.flags = DB_DBT_USERMEM;
+    data.data = &timeSize;
+    data.ulen = sizeof(timeSize);
+    data.flags = DB_DBT_USERMEM;
     
     QVector<EntryTime> tiletimes;
-    while ((ret = cursor->get(&key, &data, DB_NEXT)) == 0) {
-      assert(key.get_size() == sizeof(Key) && data.get_size() == sizeof(timeSize)); 
+    while ((ret = cursor->get(cursor, &key, &data, DB_NEXT)) == 0) {
+      assert(key.size == sizeof(Key) && data.size == sizeof(timeSize)); 
       Entry *e = new Entry(q);
       e->diskSize = timeSize[1];
       e->state = Disk;
       cacheEntries[q] = e;
       tiletimes << EntryTime(timeSize[0], q);
     }
-    cursor->close();
+    cursor->close(cursor);
     qSort(tiletimes);
     foreach (const EntryTime &t, tiletimes) {
       q = t.second;
@@ -453,7 +448,6 @@ namespace Cache {
   
   void Cache::purgeMemLRU()
   {
-    time_t tm = time(NULL);
     while (memLRUSize > ((unsigned int)maxMemCache) * bytesPerMb) {
       assert(!memLRU.empty());
       Entry &e = memLRU.front();
@@ -504,19 +498,19 @@ namespace Cache {
 
       qkey q = keyQuad(e->key);
       int layer = keyLayer(e->key);
-      int level = log2_int(q) / 2;
 
-      int step = map->layer(layer).indexLevelStep();
-      assert(level % step == 0);
+      int numLevels = map->indexNumLevels(layer, q);
 
-      int maxLevel = std::min(level + step, map->layer(layer).maxLevel());
+      int size = 0;
+      for (int i = 1; i <= numLevels; i++) {
+        // The formula sums the series 4 * (4^0 + 4^1 + 4^2 + 4^3 + ...) which is the size
+        // in bytes of a complete 4-way tree without a root node of 32-bit integers.
+        // See the online encyclopedia of integer sequences :-)
+        size += (((1 << (2 * (i + 2))) - 1) / 3 - 1);
+      }
+      //      qDebug() << "got index size " << e->indexData.size() << " expected " << size << " levels " << numLevels;
 
-      // The formula sums the series 4 * (4^1 + 4^2 + 4^3 + ...) which is the size
-      // in bytes of a complete 4-way tree without a root node of 32-bit integers.
-      // See the online encyclopedia of integer sequences :-)
-      if (e->indexData.size() !=
-             (((1 << (2 * (maxLevel - level + 2))) - 1) / 3 - 5))
-        return false;
+      if (e->indexData.size() != size) return false;
 
       return true;
     }
@@ -529,7 +523,9 @@ namespace Cache {
       return true;
     }
 
-    default: qFatal("Unknown kind in decompressObject");
+    default: 
+      qFatal("Unknown kind in decompressObject");
+      return false; // Shut up gcc warning
     }
   }
 
@@ -610,6 +606,8 @@ namespace Cache {
           delete e;
         }
         break;
+
+      default: qFatal("Invalid object state in network event");
       }
 
       if (ok) {
@@ -734,22 +732,6 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
   }
 
 
-  bool Cache::parentIndex(int layer, qkey q, qkey &index, qkey &tile)
-  {
-    int level = log2_int(q) / 2;
-    if (level == 0) return false;
-    
-    int step = map->layer(layer).indexLevelStep();
-    int idxLevel = ((level - 1) / step) * step;
-
-    assert(idxLevel == 0 || idxLevel == 6);
-    index = (q & ((1 << (idxLevel * 2)) - 1)) | (1 << (idxLevel * 2));
-    tile = q >> (idxLevel * 2);
-
-    return true;
-  }
-
-
   inline int tileSize(uint32_t *data, int off, int len) {
     assert(off < len);
     uint32_t ret = data[off];
@@ -765,38 +747,49 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
   
   void Cache::findTileRange(qkey q, Entry *e, uint32_t &offset, uint32_t &len)
   {
-    uint32_t *data = (uint32_t *)e->indexData.constData();
     if (e->indexData.isEmpty()) {
       // Dummy index
       offset = 0;
       len = 0;
       return;
     }
-    int datalen = e->indexData.size() / 4;
-    
+
+    uint32_t *idxData = (uint32_t *)e->indexData.constData();
+    int idxLen = e->indexData.size() / 4;
+
+    // Find the start of the tree for the tile level of q
+    int level = log2_int(q) / 2;
+    int base = 0;
     offset = 0;
-    int pos = 0;
+    for (int i = 1; i < level; i++) {
+      assert(base < idxLen);
+      offset += idxData[base];
+      // base += (4^0 + 4^2 + ... + 4^i)
+      base += (((1 << (2 * (i + 1))) - 1) / 3);
+    }
+   
+    //qDebug() << "tree base " << base << " offset  " << offset;
+    int pos = 1;
     // For all levels except the last one...
-    while (q > 7) {
+    for (int l = 1; l <= level - 1; l++) {
+      assert(base + pos + 4 <= idxLen);
       int digit = q & 3;
-      int i;
-      for (i = 0; i < digit; i++) {
-        offset += data[pos + i];
-      }
-      for (; i < 4; i++) {
-        offset += tileSize(data, pos + i, datalen);
+      for (int i = 0; i < digit; i++) {
+        offset += idxData[base + pos + i];
       }
       
       q >>= 2;
-      pos = 4 * (pos + digit + 1);
+      pos = 4 * (pos + digit) + 1;
     }
     
+    assert(base + pos + 4 <= idxLen);
     // The last level
     int digit = q & 3;
     for (int i = 0; i < digit; i++) {
-      offset += tileSize(data, pos + i, datalen);
+      offset += idxData[base + pos + i];
     }
-    len = tileSize(data, pos + digit, datalen);
+    len = idxData[base + pos + digit];
+    /* qDebug() << "q " << q0 << " " <<Tile(keyLayer(e->key), q0).toQuadKeyString() << " level " << level << " offset " << offset << " len " << len << " pos " << pos << " digit " << digit;*/
   }
 
   bool Cache::requestTiles(const QList<Tile> &tiles)
@@ -867,7 +860,7 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
     uint32_t offset, len;
 
     // Ensure the parent index (if any) is loaded
-    if (parentIndex(layer, q, qidx, qtile)) {
+    if (map->parentIndex(layer, q, qidx, qtile)) {
       Key idxKey = indexKey(layer, qidx);
       //      qDebug() << "qidx " << qidx << " qtile " << qtile << " idxkey " << idxKey  << " file " << map->indexFile(layer, qidx);
 

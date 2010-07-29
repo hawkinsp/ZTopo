@@ -14,7 +14,7 @@
 	  "name": "USGS 30'x60' Topographic Quads",
 	  "scale": 100000,
 	  "maxLevel": 9,
-	  "indexLevelStep": 9
+	  "indexLevelStep": 3
 	},
 	{
 	  "id": "24k",

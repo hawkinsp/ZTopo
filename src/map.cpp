@@ -42,7 +42,7 @@ Tile::Tile(int vx, int vy, int vlevel, int vlayer)
 } 
 
 Tile::Tile(int l, const QString &quad)
-  : fx(0), fy(0), flayer(l), flevel(quad.length())
+  : fx(0), fy(0), flevel(quad.length()), flayer(l)
 {
   for (int i = flevel; i > 0; i--) {
     int mask = 1 << (i - 1);
@@ -177,7 +177,7 @@ Map::Map(const QString &aId, const QString &aName, const QUrl &aBaseUrl, Datum d
   baseTileSz = 1 << logBaseTileSz;
   vMaxLevel = logSize - logBaseTileSz;
 
-  if (maxLevel() * 2 + 1 + log2_int(numLayers()) > sizeof(qkey) * 8) {
+  if (maxLevel() * 2 + 1 + log2_int(numLayers()) > int(sizeof(qkey)) * 8) {
     qFatal("Cannot pack %d levels and %d layers in %d bytes", maxLevel(), numLayers(), int(sizeof(qkey)));
   }
 
@@ -326,7 +326,7 @@ QString Map::tilePath(Tile t) const
 QString Map::indexFile(int layerId, qkey q) const
 {
   Tile t(layerId, q);
-  return layer(layerId).id() % "-t" % t.toQuadKeyString();
+  return layer(layerId).id() % "/t" % t.toQuadKeyString();
 }
 
 QRect Map::mapRectToTileRect(QRect r, int level) const
@@ -376,4 +376,34 @@ int Map::zoomLevel(qreal scaleFactor) const
   qreal scale = std::max(std::min(scaleFactor, 1.0), epsilon);
   qreal r = maxLevel() + log2(scale);
   return std::max(1, int(ceil(r)));
+}
+
+
+bool Map::parentIndex(int layerId, qkey q, qkey &index, qkey &tile) const
+{
+  int level = log2_int(q) / 2;
+  if (level == 0) return false;
+  
+  int step = layer(layerId).indexLevelStep();
+  int idxLevel;
+  if (level <= step)
+    idxLevel = 0;
+  else
+    idxLevel = step;
+
+  index = (q & ((1 << (idxLevel * 2)) - 1)) | (1 << (idxLevel * 2));
+  tile = q >> (idxLevel * 2);
+  
+  return true;
+}
+
+int Map::indexNumLevels(int layerId, qkey q) const
+{
+  int level = log2_int(q) / 2;
+  int step = layer(layerId).indexLevelStep();
+  assert(level == 0 || level == step);
+  if (level < step) 
+    return step;
+  else 
+    return layer(layerId).maxLevel() - step;
 }

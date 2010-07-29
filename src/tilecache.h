@@ -36,11 +36,11 @@
 #include <QThread>
 #include <QVariant>
 #include <QWaitCondition>
+#include <db.h>
 #include "map.h"
 
 class QNetworkReply;
-class DbEnv;
-class Db;
+
 
 namespace Cache {
   using namespace boost::intrusive;
@@ -209,8 +209,8 @@ private:
   Map *map;
   QDir cachePath;
 
-  DbEnv *dbEnv;
-  Db *timestampDb, *objectDb;
+  DB_ENV *dbEnv;
+  DB *timestampDb, *objectDb;
 
   QNetworkAccessManager manager;
 
@@ -256,9 +256,6 @@ private:
   // Save the disk cache index
   void initializeCacheFromDatabase();
 
-  // Given a layer and tile, identify the index and tile number within that index.
-  // Returns true if there is a parent index, false if q is the top-level index.
-  bool parentIndex(int layer, qkey q, qkey &idx, qkey &tile);
 
   void findTileRange(qkey q, Entry *idx, uint32_t &offset, uint32_t &len);
 
