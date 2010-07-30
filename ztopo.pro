@@ -1,19 +1,19 @@
 
+BOOST_ROOT = "/opt/local" 
+PROJ4_ROOT = "/Users/hawkinsp/Documents/Wine/drive_c/p/proj-4.7.0/src"
 BDB_ROOT = "/Users/hawkinsp/Documents/Wine/drive_c/p"
+BDB_LIB = db-5.0
+QJSON_ROOT = "/Users/hawkinsp/Documents/Wine/drive_c/Program Files/qjson"
 
 TEMPLATE = app
 TARGET = 
 DEPENDPATH += . src 
-INCLUDEPATH += . src /Users/hawkinsp/Documents/Wine/drive_c/p/proj-4.7.0/src /opt/local/include
-INCLUDEPATH += "/Users/hawkinsp/Documents/Wine/drive_c/Program Files/qjson/include"
-INCLUDEPATH += "$$BDB_ROOT/include"
-LIBS += -L "$$BDB_ROOT/lib" -ldb-5.0
-LIBS += -L"/Users/hawkinsp/Documents/Wine/drive_c/Program Files/qjson/lib" -lqjson
-LIBS += -L"/Users/hawkinsp/Documents/Wine/drive_c/p/proj-4.7.0/src/.libs" -lproj
+INCLUDEPATH += . src "$$PROJ4_ROOT/include" "$$BOOST_ROOT/include"
+INCLUDEPATH += "$$QJSON_ROOT/include" "$$BDB_ROOT/include"
+LIBS += -L "$$BDB_ROOT/lib" -l$$BDB_LIB
+LIBS += -L"$$QJSON_ROOT/lib" -lqjson
+LIBS += -L"$$PROJ4_ROOT/lib" -lproj
 
-
-#INCLUDEPATH += . src /opt/local/include /Users/hawkinsp/opt/qjson/include /opt/local/include/db47
-#LIBS += -L/opt/local/lib/db47 -ldb_cxx-4.7 -framework CoreFoundation -L/Users/hawkinsp/opt/qjson/lib -lqjson -L/opt/local/lib -lproj
 
 # Input
 HEADERS += src/consts.h \
@@ -40,3 +40,4 @@ SOURCES += src/coordformatter.cpp \
 
 RESOURCES += src/images.qrc
 QT += network opengl
+RC_FILE = images/topo.rc

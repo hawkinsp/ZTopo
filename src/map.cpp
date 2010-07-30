@@ -177,8 +177,8 @@ Map::Map(const QString &aId, const QString &aName, const QUrl &aBaseUrl, Datum d
   baseTileSz = 1 << logBaseTileSz;
   vMaxLevel = logSize - logBaseTileSz;
 
-  if (maxLevel() * 2 + 1 + log2_int(numLayers()) > int(sizeof(qkey)) * 8) {
-    qFatal("Cannot pack %d levels and %d layers in %d bytes", maxLevel(), numLayers(), int(sizeof(qkey)));
+  if (maxLevel() * 2 + 1 > int(sizeof(qkey)) * 8) {
+    qFatal("Cannot pack %d levels in %d bytes", maxLevel(), int(sizeof(qkey)));
   }
 
   foreach (const Layer &l, layers) {
