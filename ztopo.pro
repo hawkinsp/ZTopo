@@ -38,6 +38,6 @@ SOURCES += src/coordformatter.cpp \
            src/rootdata.cpp \
            src/tilecache.cpp \
 
-RESOURCES += src/images.qrc
+RESOURCES += src/resources.qrc
 QT += network opengl
 RC_FILE = images/topo.rc

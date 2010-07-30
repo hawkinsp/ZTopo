@@ -50,7 +50,7 @@ int main(int argc, char **argv)
 
   QApplication app(argc, argv);
 
-  QString rootDataName("root.json");
+  QString rootDataName(":/config/root.json");
 
 #if defined(Q_WS_MAC)
   // Mac OS specific code to find resources within a bundle
@@ -63,9 +63,8 @@ int main(int argc, char **argv)
     qFatal("Could not find Mac application bundle path!");
   }
   QString rootPath = QString(pathPtr) % "/Contents/Resources/";
-  rootDataName = rootPath % rootDataName;
   QByteArray rootPathArray = QString(rootPath % "proj4").toLatin1();
-  qDebug("proj root '%s'\n", rootPathArray.data());
+  //qDebug("proj root '%s'\n", rootPathArray.data());
 
   const char *path[] = { rootPathArray.data() };
   pj_set_searchpath(1, (const char **)&path);
@@ -74,7 +73,7 @@ int main(int argc, char **argv)
 #elif defined(Q_WS_WIN)
   /* On Windows, use the proj4 subdirectory of the directory containing the application */
   QString projPath = app.applicationDirPath() % "/proj4";
-  qDebug() << "proj root" << projPath;
+  //qDebug() << "proj root" << projPath;
   const char *path[] = { QDir::toNativeSeparators(projPath).toLatin1().data() };
   pj_set_searchpath(1, (const char **)&path);
 #endif

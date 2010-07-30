@@ -23,7 +23,7 @@ set(ztopo_MOC_HDRS
   preferences.h
 )
 set(ztopo_RCCS
-  images.qrc
+  resources.qrc
 )  
 set(ztopo_UIS
   preferences.ui
