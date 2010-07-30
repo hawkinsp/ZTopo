@@ -53,6 +53,7 @@ static const int retryTimeout = 500; // Wait 500ms for tiles to arrive before re
 QString settingMemCache = "maxMemCache";
 QString settingDiskCache = "maxDiskCache";
 QString settingDpi = "screenDpi";
+QString settingUseOpenGL = "useOpenGL";
 
 QVector<MainWindow *> windowList;
 
@@ -63,6 +64,8 @@ MainWindow::MainWindow(Map *m, MapRenderer *r, QWidget *parent)
   setWindowTitle(tr("Topographic Map Viewer"));
   setUnifiedTitleAndToolBarOnMac(true);
   resize(800, 600);
+
+  readSettings();
 
   coordFormats << new UTMFormatter();
   coordFormats << new DMSFormatter();
@@ -84,7 +87,6 @@ MainWindow::MainWindow(Map *m, MapRenderer *r, QWidget *parent)
   createWidgets();
   createActions();
   createMenus();
-  readSettings();
 
   view->centerOn(QPoint(map->requestedSize().width() / 2, map->requestedSize().height() / 2));
   connect(view, SIGNAL(positionUpdated(QPoint)), this, SLOT(updatePosition(QPoint)));
@@ -285,7 +287,7 @@ void MainWindow::createWidgets()
 
 
   // Create the main view
-  view = new MapWidget(map, renderer);
+  view = new MapWidget(map, renderer, usingGL);
   view->setCursor(Qt::OpenHandCursor);
   setCentralWidget(view);
 
@@ -497,6 +499,7 @@ void MainWindow::readSettings()
   screenDpi = settings.value(settingDpi, 0).toInt();
   restoreGeometry(settings.value("geometry").toByteArray());
   restoreState(settings.value("windowState").toByteArray());
+  usingGL = settings.value(settingUseOpenGL, false).toBool();
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -550,6 +553,7 @@ void MainWindow::preferencesTriggered()
   PreferencesDialog prefDlg(cache);
   prefDlg.setDpi(screenDpi);
   prefDlg.setCacheSizes(cache.getMemCacheSize(), cache.getDiskCacheSize());
+  prefDlg.setUseOpenGL(usingGL);
   int ret = prefDlg.exec();
 
   if (ret != QDialog::Accepted)
@@ -561,6 +565,12 @@ void MainWindow::preferencesTriggered()
   settings.setValue(settingDpi, screenDpi);
   settings.setValue(settingMemCache, prefDlg.getMemSize());
   settings.setValue(settingDiskCache, prefDlg.getDiskSize());
+  settings.setValue(settingUseOpenGL, prefDlg.getUseOpenGL());
+  if (usingGL != prefDlg.getUseOpenGL()) {
+    foreach (MainWindow *w, windowList) {
+      w->glPreferenceChanged(prefDlg.getUseOpenGL());
+    }
+  }
 }
 
 void MainWindow::windowListChanged()
@@ -582,6 +592,12 @@ void MainWindow::windowListChanged()
     windowActions->addAction(a);
     windowMenu->addAction(a);
   }
+}
+
+void MainWindow::glPreferenceChanged(bool useGL)
+{
+  usingGL = useGL;
+  view->setGL(useGL);
 }
 
 void MainWindow::windowActionTriggered(QAction *a)

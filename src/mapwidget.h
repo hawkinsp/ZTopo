@@ -36,7 +36,7 @@ class QPinchGesture;
 class MapWidget : public QAbstractScrollArea, public MapRendererClient {
   Q_OBJECT
 public:
-  MapWidget(Map *m, MapRenderer *r, QWidget *parent = 0);
+  MapWidget(Map *m, MapRenderer *r, bool useGL, QWidget *parent = 0);
   ~MapWidget();
 
 
@@ -72,6 +72,9 @@ public:
 
   // Layer choice
   void setLayer(int layer);
+
+  // Use OpenGL?
+  void setGL(bool use);
 
 signals:
   void positionUpdated(QPoint pos);

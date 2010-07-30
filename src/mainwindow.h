@@ -180,7 +180,11 @@ private:
   Datum currentDatum();
   CoordFormatter *currentCoordFormatter();
 
+  bool usingGL;
+
+  // Notifications from peer windows
   void windowListChanged();
+  void glPreferenceChanged(bool useGL);
 };
 
 

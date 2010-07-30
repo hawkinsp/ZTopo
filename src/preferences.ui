@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>408</width>
-    <height>291</height>
+    <width>413</width>
+    <height>348</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -63,6 +63,22 @@
         </property>
         <property name="value">
          <number>98</number>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupBox_3">
+     <property name="title">
+      <string>Rendering</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_2">
+      <item row="0" column="0">
+       <widget class="QCheckBox" name="openglCheckBox">
+        <property name="text">
+         <string>Use OpenGL-Accelerated Rendering</string>
         </property>
        </widget>
       </item>

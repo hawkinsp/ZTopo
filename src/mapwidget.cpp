@@ -33,7 +33,7 @@
 #include <iostream>
 #include <cstdio>
 
-MapWidget::MapWidget(Map *m, MapRenderer *r, QWidget *parent)
+MapWidget::MapWidget(Map *m, MapRenderer *r, bool useGL, QWidget *parent)
   : QAbstractScrollArea(parent), map(m), renderer(r)
 {
   renderer->addClient(this);
@@ -50,8 +50,12 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, QWidget *parent)
   gridEnabled = false;
   showRuler = true;
 
-  setViewport(new QWidget());
-//  setViewport(new QGLWidget(QGLFormat(QGL::SampleBuffers)));
+  if (useGL) {
+    setViewport(new QGLWidget(QGLFormat(QGL::SampleBuffers)));
+  } else {
+    setViewport(new QWidget());
+  }
+
 
   connect(r, SIGNAL(tileUpdated()), viewport(), SLOT(update()));
 
@@ -67,6 +71,15 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, QWidget *parent)
 MapWidget::~MapWidget()
 {
   renderer->removeClient(this);
+}
+
+void MapWidget::setGL(bool useGL) 
+{
+  if (useGL) {
+    setViewport(new QGLWidget(QGLFormat(QGL::SampleBuffers)));
+  } else {
+    setViewport(new QWidget());
+  }
 }
 
 void MapWidget::updateScrollBars()

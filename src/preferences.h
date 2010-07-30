@@ -13,9 +13,11 @@ public:
   int getDpi();
   int getMemSize();
   int getDiskSize();
+  bool getUseOpenGL();
 
   void setDpi(int customValue);
   void setCacheSizes(int memSize, int diskSize);
+  void setUseOpenGL(bool);
 
 private slots:
   void emptyCacheClick();

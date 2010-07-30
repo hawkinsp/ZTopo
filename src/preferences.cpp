@@ -27,6 +27,16 @@ int PreferencesDialog::getDiskSize()
   return ui.diskCacheSize->value();
 }
 
+bool PreferencesDialog::getUseOpenGL()
+{
+  return ui.openglCheckBox->isChecked();
+}
+
+void PreferencesDialog::setUseOpenGL(bool use)
+{
+  ui.openglCheckBox->setChecked(use);
+}
+
 void PreferencesDialog::setDpi(int dpi)
 {
   if (dpi <= 0) {
