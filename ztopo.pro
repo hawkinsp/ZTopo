@@ -1,10 +1,17 @@
+
+BDB_ROOT = "/Users/hawkinsp/Documents/Wine/drive_c/p"
+
 TEMPLATE = app
 TARGET = 
 DEPENDPATH += . src 
 INCLUDEPATH += . src /Users/hawkinsp/Documents/Wine/drive_c/p/proj-4.7.0/src /opt/local/include
 INCLUDEPATH += "/Users/hawkinsp/Documents/Wine/drive_c/Program Files/qjson/include"
-INCLUDEPATH += "/Users/hawkinsp/Documents/Wine/drive_c/Program Files/Oracle/Berkeley DB 11gR2 5.0.26/include"
-LIBS += -L/Users/hawkinsp/Documents/Wine/drive_c/p/bdblib -ldb50
+INCLUDEPATH += "$$BDB_ROOT/include"
+LIBS += -L "$$BDB_ROOT/lib" -ldb-5.0
+LIBS += -L"/Users/hawkinsp/Documents/Wine/drive_c/Program Files/qjson/lib" -lqjson
+LIBS += -L"/Users/hawkinsp/Documents/Wine/drive_c/p/proj-4.7.0/src/.libs" -lproj
+
+
 #INCLUDEPATH += . src /opt/local/include /Users/hawkinsp/opt/qjson/include /opt/local/include/db47
 #LIBS += -L/opt/local/lib/db47 -ldb_cxx-4.7 -framework CoreFoundation -L/Users/hawkinsp/opt/qjson/lib -lqjson -L/opt/local/lib -lproj
 

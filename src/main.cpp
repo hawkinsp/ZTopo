@@ -19,6 +19,7 @@
 
 #include <QApplication>
 #include <QDebug>
+#include <QDir>
 #include <QDesktopServices>
 #include <QMetaType>
 #include <QSettings>
@@ -51,7 +52,7 @@ int main(int argc, char **argv)
 
   QString rootDataName("root.json");
 
- #ifdef Q_WS_MAC
+#if defined(Q_WS_MAC)
   // Mac OS specific code to find resources within a bundle
   CFURLRef appUrlRef = CFBundleCopyBundleURL(CFBundleGetMainBundle());
   CFStringRef macPath = CFURLCopyFileSystemPath(appUrlRef,
@@ -64,13 +65,21 @@ int main(int argc, char **argv)
   QString rootPath = QString(pathPtr) % "/Contents/Resources/";
   rootDataName = rootPath % rootDataName;
   QByteArray rootPathArray = QString(rootPath % "proj4").toLatin1();
-  printf("proj root '%s'\n", rootPathArray.data());
+  qDebug("proj root '%s'\n", rootPathArray.data());
 
   const char *path[] = { rootPathArray.data() };
   pj_set_searchpath(1, (const char **)&path);
   CFRelease(appUrlRef);
   CFRelease(macPath);  
- #endif
+#elif defined(Q_WS_WIN)
+  /* On Windows, use the proj4 subdirectory of the directory containing the application */
+  QString projPath = app.applicationDirPath() % "/proj4";
+  qDebug() << "proj root" << projPath;
+  const char *path[] = { QDir::toNativeSeparators(projPath).toLatin1().data() };
+  pj_set_searchpath(1, (const char **)&path);
+#endif
+
+  // On other operating systems, we assume the proj4 library can find its own datum shift grids.
 
   QFile rootData(rootDataName);
   if (!rootData.exists()) {

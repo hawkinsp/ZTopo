@@ -50,8 +50,8 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, QWidget *parent)
   gridEnabled = false;
   showRuler = true;
 
-  //setViewport(new QWidget());
-  setViewport(new QGLWidget(QGLFormat(QGL::SampleBuffers)));
+  setViewport(new QWidget());
+//  setViewport(new QGLWidget(QGLFormat(QGL::SampleBuffers)));
 
   connect(r, SIGNAL(tileUpdated()), viewport(), SLOT(update()));
 

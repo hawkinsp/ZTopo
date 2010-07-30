@@ -242,6 +242,7 @@ namespace Cache {
       QString timestampDbName = map->id() % "-timestamp.db";
       
       uint32_t envFlags = DB_CREATE | DB_INIT_MPOOL;
+
       int ret = db_env_create(&dbEnv, 0);
       if (ret != 0) goto dberror;
       ret = dbEnv->open(dbEnv, cachePath.path().toLatin1().data(), envFlags, 0);
@@ -250,13 +251,13 @@ namespace Cache {
       if (ret != 0) goto dberror;
       ret = db_create(&timestampDb, dbEnv, 0);
       if (ret != 0) goto dberror;
-      
       ret = objectDb->open(objectDb, NULL, objectDbName.toLatin1().data(), NULL, DB_BTREE, dbFlags, 0);
       if (ret != 0) goto dberror;
       ret = timestampDb->open(timestampDb, NULL, timestampDbName.toLatin1().data(), NULL, DB_BTREE, 
                               dbFlags, 0);
       if (ret != 0) goto dberror;
       
+      initializeCacheFromDatabase();
       break;
 
     dberror:
@@ -268,7 +269,7 @@ namespace Cache {
                cachePath.path().toLatin1().data());
     } while (false);
     
-    initializeCacheFromDatabase();
+
     
     for (int i = 0; i < numWorkerThreads; i++) {
       IOThread *ioThread = new IOThread(this, this);
