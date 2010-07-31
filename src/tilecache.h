@@ -89,7 +89,6 @@ namespace Cache {
     State state;
     bool inUse;   // This tile is being viewed
   };
-  
   typedef list< Entry, base_hook<LRUBaseHook>, constant_time_size<false> > 
     CacheList;
 
@@ -132,21 +131,49 @@ namespace Cache {
     void objectSavedToDisk(Key key, bool success);
   };
   
-  struct NetworkRequest {
-    NetworkRequest(Key key, qkey q, uint32_t off, uint32_t len);
-    
-    qkey qid; // Index object
-    uint32_t offset, len;
-    Key key;  // Requested object
+  typedef list_base_hook<link_mode<auto_unlink> > BundleBaseHook;
+  class NetworkRequestBundle : public QObject, public BundleBaseHook {
+    Q_OBJECT;
+  public:
+    NetworkRequestBundle(Cache *cache, 
+                         Map *map, qkey index, uint32_t offset, Key key, uint32_t len,
+                         QObject *parent = 0);
 
-    bool operator<  (const NetworkRequest& other) const {
-      return (qid < other.qid) ||
-        (qid == other.qid && offset < other.offset) ||
-        (qid == other.qid && offset == other.offset && len < other.len) ||  
-        (qid == other.qid && offset == other.offset && len == other.len 
-         && key < other.key);
-    }
+    static bool lessThan (NetworkRequestBundle const *a, 
+                          NetworkRequestBundle const *b);
+    
+    int layer() const { return fLayer; }
+    int kind() const { return fKind; }
+    uint32_t offset() const { return fOffset; }
+    uint32_t length() const;
+
+    int numRequests() const { return reqs.size(); }
+
+    // Try to merge another bundle with this one. Returns true on success.
+    bool mergeBundle(NetworkRequestBundle *bundle);
+    void makeRequests(QNetworkAccessManager *);
+
+  private:
+    Cache *cache;
+    Map *map;
+    int fLayer;
+    Kind fKind;
+    qkey qidx; // Index object
+    uint32_t fOffset;           // Base offset
+    // Sequence of requested objects and their lengths   
+    QList<QPair<Key, uint32_t> > reqs; 
+    
+
+    QNetworkReply *reply;
+
+  private slots:
+    void requestFinished();    
   };
+  typedef list< NetworkRequestBundle, base_hook<BundleBaseHook>, 
+    constant_time_size<false> > BundleList;
+
+
+
 
  
   class NewDataEvent : public QEvent {
@@ -193,7 +220,7 @@ public:
   void pruneObjects(const QList<QRect> &rects);
 
   friend class IOThread;
-
+  friend class NetworkRequestBundle;
 
   virtual bool event(QEvent *e);
   
@@ -202,7 +229,6 @@ signals:
   void tileLoaded();
 
 private slots:
-  void objectReceivedFromNetwork(QNetworkReply *);
   void objectSavedToDisk(Key key, bool success);
 
 private:
@@ -238,7 +264,8 @@ private:
   // Tiles in state DiskAndMemory or MemoryOnly which are in use.
   CacheList memInUse;   
 
-  unsigned int diskCacheHits, diskCacheMisses, memCacheHits, memCacheMisses, numNetworkReqs, networkReqSize;
+  unsigned int diskCacheHits, diskCacheMisses, memCacheHits, memCacheMisses;
+  unsigned int numNetworkBundles, numNetworkReqs, networkReqSize;
 
 
   // Everything below this point is accessed by tile IO threads
@@ -265,11 +292,20 @@ private:
   bool loadObject(Entry *e, const QByteArray &indexData, const QImage &tileData);
 
   void maybeFetchIndexPendingTiles();
-  void maybeMakeNetworkRequest(Entry *e);
+  void maybeAddNetworkRequest(Entry *e);
 
   // Network request that haven't yet been posted, awaiting coalescing
-  QList<NetworkRequest> networkRequests;
-  void flushNetworkRequests();
+
+
+  void networkRequestFinished();
+  int requestsInFlight;
+
+  // Requests ordered by the bundle less than operator
+  QList<NetworkRequestBundle *> networkRequests;
+
+  // Requests in FIFO order
+  BundleList networkRequestQueue;
+  void startNetworkRequests();
 };
 
 }

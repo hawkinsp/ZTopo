@@ -35,8 +35,8 @@ static const int maxThreadWaitTime = 1000; // Maximum time to wait for a thread 
 
 static const int maxBufferSize = 500000;
 
-static const QNetworkRequest::Attribute keyAttr(QNetworkRequest::User);
-
+// Maximum number of network requests in flight simultaneously
+static const int maxNetworkRequestsInFlight = 6;
 
 namespace Cache {
   typedef QPair<Key, uint32_t> NetworkReqKey;
@@ -76,11 +76,121 @@ namespace Cache {
   }
 
 
-  NetworkRequest::NetworkRequest(Key k, qkey q, uint32_t off, uint32_t l)
-    : qid(q), offset(off), len(l), key(k) 
+  NetworkRequestBundle::NetworkRequestBundle(Cache *c, Map *m, qkey index, 
+                         uint32_t off, Key key, uint32_t len, QObject *parent)
+    : QObject(parent), cache(c), map(m), qidx(index), fOffset(off)
   {
+    fLayer = keyLayer(key);
+    fKind = keyKind(key);
+    reqs << NetworkReqKey(key, len);
   }
   
+  bool NetworkRequestBundle::lessThan(NetworkRequestBundle const *a,
+                                      NetworkRequestBundle const *b)
+  {
+    return (a->qidx < b->qidx) ||
+      (a->qidx == b->qidx && a->fLayer < b->fLayer) ||
+      (a->qidx == b->qidx && a->fLayer == b->fLayer && a->fKind < b->fKind) ||
+      (a->qidx == b->qidx && a->fLayer == b->fLayer && a->fKind == b->fKind &&
+       a->fOffset < b->fOffset);
+  }
+
+  uint32_t NetworkRequestBundle::length() const
+  {
+    uint32_t len = 0;
+    foreach (const NetworkReqKey &req, reqs) {
+      len += req.second;
+    }
+    return len;
+  }
+
+  bool NetworkRequestBundle::mergeBundle(NetworkRequestBundle *other)
+  {
+    assert(other != NULL);
+    if (qidx != other->qidx || fLayer != other->fLayer || fKind != other->fKind)
+      return false;
+    
+    if (offset() + length() == other->offset()) {
+      reqs.append(other->reqs);
+      return true;
+    } else if (other->offset() + other->length() == offset()) {
+      fOffset = other->offset();
+      reqs = other->reqs + reqs;
+      return true;
+    }
+
+    return false;
+  }
+
+  void NetworkRequestBundle::makeRequests(QNetworkAccessManager *manager)
+  {
+    QString baseUrl(map->baseUrl().toString());
+    QString url = baseUrl % "/" % map->indexFile(fLayer, qidx) % 
+      ((fKind == IndexKind) ? ".idxz" : ".dat");
+    QNetworkRequest req;
+    req.setUrl(QUrl(url));
+    req.setAttribute(QNetworkRequest::HttpPipeliningAllowedAttribute, true);
+
+    // qDebug() << "req " << url << " off " << n.offset << " len "<< offset - n.offset << " coalesce " << bundle->size();
+    if (length() >= 0) {
+      QString rangeHdr = "bytes=" % QString::number(uint(fOffset)) % "-" %
+        QString::number(uint(fOffset  + length() - 1));
+      req.setRawHeader(QByteArray("Range"), rangeHdr.toLatin1());
+    }
+    
+    reply = manager->get(req);
+    if (reply->error()) {
+      requestFinished();
+    } else {
+      connect(reply, SIGNAL(finished()), this, SLOT(requestFinished()));
+    }
+  }
+
+  void NetworkRequestBundle::requestFinished()
+  {
+    QByteArray data;
+    bool ok;
+    ok = (reply->error() == QNetworkReply::NoError);
+    if (ok) {
+      data = reply->readAll();
+      ok = !data.isEmpty();
+    }
+
+    int pos = 0;
+    foreach (const NetworkReqKey &r, reqs) {
+      Key key = r.first;
+      
+      assert(r.second != 0 || reqs.size() == 1);
+      int len = (r.second == 0) ? data.size() : r.second;
+
+      QByteArray subData;
+      QByteArray indexData;
+      QImage tileData;
+
+      ok = ok && (pos + len <= data.size());
+      if (ok) {
+        subData = QByteArray(data.constData() + pos, len);
+        Cache::decompressObject(key, subData, indexData, tileData);
+      }
+
+      NewDataEvent *ev = new NewDataEvent(key, subData, indexData, tileData);
+      QCoreApplication::postEvent(cache, ev, Qt::LowEventPriority);
+      cache->networkRequestFinished();
+
+      if (!ok) {
+        qDebug() << "WARNING: Error reading network object " << key << ": " 
+                 << reply->request().url().toString() << " " 
+                 << reply->error() << reply->errorString();
+      }
+      
+      pos += len;
+    }
+    reply->deleteLater();
+    deleteLater();
+  }
+
+
+
 
   IOThread::IOThread(Cache *v, QObject *parent)
     : QThread(parent), cache(v)
@@ -233,8 +343,8 @@ namespace Cache {
     : map(m), cachePath(cp), dbEnv(NULL), timestampDb(NULL), objectDb(NULL),
       manager(this), maxMemCache(maxMem), 
       maxDiskCache(maxDisk),  diskLRUSize(0), memLRUSize(0),
-      diskCacheHits(0), diskCacheMisses(0), memCacheHits(0), memCacheMisses(0), numNetworkReqs(0),
-      networkReqSize(0)
+      diskCacheHits(0), diskCacheMisses(0), memCacheHits(0), memCacheMisses(0), 
+    numNetworkBundles(0), numNetworkReqs(0), networkReqSize(0), requestsInFlight(0)
   {
     do {
       uint32_t dbFlags = DB_CREATE;
@@ -251,10 +361,11 @@ namespace Cache {
       if (ret != 0) goto dberror;
       ret = db_create(&timestampDb, dbEnv, 0);
       if (ret != 0) goto dberror;
-      ret = objectDb->open(objectDb, NULL, objectDbName.toLatin1().data(), NULL, DB_BTREE, dbFlags, 0);
+      ret = objectDb->open(objectDb, NULL, objectDbName.toLatin1().data(), NULL,
+                           DB_BTREE, dbFlags, 0);
       if (ret != 0) goto dberror;
-      ret = timestampDb->open(timestampDb, NULL, timestampDbName.toLatin1().data(), NULL, DB_BTREE, 
-                              dbFlags, 0);
+      ret = timestampDb->open(timestampDb, NULL, timestampDbName.toLatin1().data(),
+                              NULL, DB_BTREE, dbFlags, 0);
       if (ret != 0) goto dberror;
       
       initializeCacheFromDatabase();
@@ -281,9 +392,6 @@ namespace Cache {
       
       ioThread->start();
     }
-    
-    connect(&manager, SIGNAL(finished(QNetworkReply*)),
-            this, SLOT(objectReceivedFromNetwork(QNetworkReply*)));
   }
   
   Cache::~Cache()
@@ -308,7 +416,11 @@ namespace Cache {
              << " (" << 
       qreal(diskCacheHits * 100.0) / qreal(diskCacheHits + diskCacheMisses) << "%)";
     qDebug() << "Network requests: " << numNetworkReqs << " size: " << networkReqSize 
-             << " (" << qreal(networkReqSize) / qreal(numNetworkReqs) << " per request)";
+             << " (" << qreal(networkReqSize) / qreal(numNetworkReqs) << " bytes per request)";
+    qDebug() << "Network bundles: " << numNetworkBundles << "; " << 
+      qreal(numNetworkReqs) / qreal(numNetworkBundles) << " reqs per bundle (" 
+             << qreal(networkReqSize) / qreal(numNetworkBundles) 
+             << " bytes per bundle)";
     
     // Clear the cache
     foreach (Entry *t, cacheEntries) {
@@ -538,9 +650,9 @@ namespace Cache {
     while (it != itend) {
       Entry &e = *it;
       it++;
-      maybeMakeNetworkRequest(&e);
+      maybeAddNetworkRequest(&e);
     }
-    flushNetworkRequests();
+    startNetworkRequests();
   }
 
   static const QEvent::Type newDataEventType = QEvent::Type(QEvent::registerEventType());
@@ -649,61 +761,6 @@ void Cache::objectSavedToDisk(Key q, bool success)
   }
 }
 
-void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
-{
-  QNetworkRequest req = reply->request();
-  QList<NetworkReqKey> *reqKeys = 
-    (QList<NetworkReqKey> *) req.attribute(keyAttr).value<void *>();
-
-  QByteArray data;
-  bool ok;
-  ok = (reply->error() == QNetworkReply::NoError);
-  if (ok) {
-    data = reply->readAll();
-    ok = !data.isEmpty();
-  }
-
-  int pos = 0;
-  foreach (const NetworkReqKey &r, *reqKeys) {
-    Key key = r.first;
-
-    assert(r.second != 0 || reqKeys->size() == 1);
-    int len = (r.second == 0) ? data.size() : r.second;
-      
-    assert(cacheEntries.contains(key));
-    Entry *e = cacheEntries.value(key);
-    assert(e->state == NetworkPending);
-   
-
-
-    ok = ok && (pos + len <= data.size());
-    if (ok) {
-      QByteArray indexData;
-      QImage tileData;
-
-      QByteArray subData(data.constData() + pos, len);
-      decompressObject(key, subData, indexData, tileData);
-      //      ok = loadObject(e, indexData, tileData);
-      //      e->diskSize = subData.size();
-      QCoreApplication::postEvent(this, new NewDataEvent(key, subData, indexData, tileData), 
-                                  Qt::LowEventPriority);
-    }
-
-    if (!ok) {
-      // We had a network error; we have no way to restore the tile to a valid
-      // state so we just dump it. If it is wanted again it will be requested again.
-      qDebug() << "WARNING: Error reading network object " << key << ": " << req.url().toString() << " " 
-               << reply->error() << reply->errorString();
-      
-      cacheEntries.remove(key);
-      delete e;
-    }
-
-    pos += len;
-  }
-  delete reqKeys;
-}
-
 
   // Find tiles that were previously in use that are no longer in use.
   void Cache::pruneObjects(const QList<QRect> &rects)
@@ -733,19 +790,6 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
   }
 
 
-  inline int tileSize(uint32_t *data, int off, int len) {
-    assert(off < len);
-    uint32_t ret = data[off];
-    
-    off = 4 * (off + 1);
-    if (off + 4 <= len) {
-      for (int i = 0; i < 4; i++) {
-        ret -= data[off + i];
-      }
-    }
-    return ret;
-  }
-  
   void Cache::findTileRange(qkey q, Entry *e, uint32_t &offset, uint32_t &len)
   {
     if (e->indexData.isEmpty()) {
@@ -803,55 +847,33 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
       //    tileKey(q) << " present " << tilePresent; }
       present = present && tilePresent;
     }
-    flushNetworkRequests();
+    startNetworkRequests();
     return present;
   }
 
-  void Cache::flushNetworkRequests() {
-    QString baseUrl(map->baseUrl().toString());
-
-    qSort(networkRequests);
-
-    int i = 0;
-    while (i < networkRequests.size()) {
-      NetworkRequest &n = networkRequests[i];
-
-      qkey qid = n.qid;
-      Kind kind = keyKind(n.key);
-      uint32_t offset = n.offset;
-
-      QList<NetworkReqKey> *bundle = new QList<NetworkReqKey>();
-      while (i < networkRequests.size() && keyKind(networkRequests[i].key) == kind &&
-             networkRequests[i].qid == qid &&
-             networkRequests[i].offset == offset) {
-        uint32_t len = networkRequests[i].len;
-        *bundle << NetworkReqKey(networkRequests[i].key, len);
-        offset += len;
-        i++;
-      }
-
-      QString url = baseUrl % "/" % map->indexFile(keyLayer(n.key), n.qid) % 
-        ((kind == IndexKind) ? ".idxz" : ".dat");
-      QNetworkRequest req;
-      req.setUrl(QUrl(url));
-      req.setAttribute(keyAttr, qVariantFromValue((void *)bundle));
-
-      // qDebug() << "req " << url << " off " << n.offset << " len "<< offset - n.offset << " coalesce " << bundle->size();
-      if (n.len >= 0) {
-        QString rangeHdr = "bytes=" % QString::number(uint(n.offset)) % "-" %
-          QString::number(uint(offset - 1));
-        req.setRawHeader(QByteArray("Range"), rangeHdr.toLatin1());
-      }
-
-      numNetworkReqs++;
-      networkReqSize += offset - n.offset;
-      manager.get(req);
+  void Cache::startNetworkRequests() {
+    while (requestsInFlight < maxNetworkRequestsInFlight &&
+           !networkRequestQueue.empty()) {
+      NetworkRequestBundle &b = networkRequestQueue.front();
+      networkRequestQueue.pop_front();
+      networkRequests.removeOne(&b);
+      
+      numNetworkReqs += b.numRequests();
+      numNetworkBundles++;
+      networkReqSize += b.length();
+      
+      requestsInFlight++;
+      b.makeRequests(&manager);
     }
-
-    networkRequests.clear();
   }
 
-  void Cache::maybeMakeNetworkRequest(Entry *e)
+  void Cache::networkRequestFinished()
+  {
+    requestsInFlight--;
+    startNetworkRequests();
+  }
+
+  void Cache::maybeAddNetworkRequest(Entry *e)
   {
     assert(e->state == IndexPending && e->is_linked());
 
@@ -891,20 +913,57 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
     e->unlink();
     e->state = NetworkPending;
 
-    // qDebug() << "request " << e->key << " network get";
-    //    qDebug() << "key " << e->key << " q " << q << " " << baseUrl;
-    switch (keyKind(e->key)) {
-    case TileKind: {
-      networkRequests << NetworkRequest(e->key, qidx, offset, len);
-      break;
+
+    if (keyKind(e->key) == IndexKind) {
+      // Fetch the whole of every index.
+      offset = 0;
+      len = 0;
+      qidx = q;
     }
-    case IndexKind: {
-      networkRequests << NetworkRequest(e->key, q, 0, 0);
-      break;
+
+    /*    qDebug() << "Req list before insert";
+    for (int i = 0; i<networkRequests.size(); i++) {
+      qDebug() << networkRequests[i]->kind() << " " << networkRequests[i]->layer() << " " << networkRequests[i]->offset() << " " << networkRequests[i]->length();
+      }*/
+
+    // First enqueue the item
+    NetworkRequestBundle *bundle =
+      new NetworkRequestBundle(this, map, qidx, offset, e->key, len, this);
+    QList<NetworkRequestBundle *>::iterator cur, next =
+      qLowerBound(networkRequests.begin(), networkRequests.end(), bundle, 
+                  NetworkRequestBundle::lessThan);
+
+    // Try to merge the bundle with the preceding bundle
+    if (next != networkRequests.begin()) {
+      QList<NetworkRequestBundle *>::iterator prev = next - 1;
+      if ((*prev)->mergeBundle(bundle)) {
+        delete bundle;
+        bundle = *prev;
+        cur = prev;
+      } else {
+        cur = networkRequests.insert(next, bundle);
+        next = cur + 1;
+        networkRequestQueue.push_back(*bundle);
+      }
+    } else {
+      cur = networkRequests.insert(next, bundle);
+      next = cur + 1;
+      networkRequestQueue.push_back(*bundle);
     }
-    default: qFatal("Unknown kind in requestObject");
+
+    // Try to merge the (possibly) combined bundle with the next bundle
+    if (next != networkRequests.end()) {
+      if ((*next)->mergeBundle(bundle)) {
+        networkRequests.erase(cur);
+        delete bundle;
+      }
     }
-    //    qDebug() << "fetching url " << req.url();
+
+    /*qDebug() << "Req list after insert";
+    for (int i = 0; i<networkRequests.size(); i++) {
+      qDebug() << networkRequests[i]->kind() << " " << networkRequests[i]->layer() << " " << networkRequests[i]->offset() << " " << networkRequests[i]->length();
+      }*/
+
   }
 
   bool Cache::requestObject(Key key)
@@ -964,7 +1023,7 @@ void Cache::objectReceivedFromNetwork(QNetworkReply *reply)
       e->inUse = true;
       present = false;
       indexPending.push_back(*e);
-      maybeMakeNetworkRequest(e);
+      maybeAddNetworkRequest(e);
     } 
     return present;
   }
