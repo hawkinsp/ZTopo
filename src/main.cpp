@@ -101,8 +101,9 @@ int main(int argc, char **argv)
 
   int maxMemCache = settings.value(settingMemCache, 64).toInt();
   int maxDiskCache = settings.value(settingDiskCache, 200).toInt();
-  MapRenderer renderer(map, networkManager, maxMemCache, maxDiskCache, cachePath);
-  MainWindow *window = new MainWindow(map, &renderer, networkManager);
+  Cache::Cache tileCache(map, networkManager, maxMemCache, maxDiskCache, cachePath);
+  MapRenderer renderer(map, tileCache);
+  MainWindow *window = new MainWindow(map, &renderer, tileCache, networkManager);
   //  QPixmapCache::setCacheLimit(50000);
 
   window->show();

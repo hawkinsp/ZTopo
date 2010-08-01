@@ -63,9 +63,9 @@ QString settingUseOpenGL = "useOpenGL";
 
 QVector<MainWindow *> windowList;
 
-MainWindow::MainWindow(Map *m, MapRenderer *r, QNetworkAccessManager &mgr, 
-                       QWidget *parent)
-  : QMainWindow(parent), map(m), renderer(r), networkManager(mgr),
+MainWindow::MainWindow(Map *m, MapRenderer *r, Cache::Cache &c, 
+                       QNetworkAccessManager &mgr, QWidget *parent)
+  : QMainWindow(parent), map(m), renderer(r), tileCache(c), networkManager(mgr),
     pendingSearch(NULL),
     printer(QPrinter::HighResolution)
 {
@@ -77,6 +77,9 @@ MainWindow::MainWindow(Map *m, MapRenderer *r, QNetworkAccessManager &mgr,
   defaultSearchCaption = tr("Search for coordinates or places");
 
   readSettings();
+
+  connect(&tileCache, SIGNAL(ioError(const QString &)),
+          this, SLOT(cacheIOError(const QString &)));
 
   coordFormats << new UTMFormatter();
   coordFormats << new DMSFormatter();
@@ -170,12 +173,12 @@ void clonePrinter(const QPrinter &from, QPrinter &to)
 }
 */
 
-PrintJob::PrintJob(Map *m, MapRenderer *r, QPrinter *p, int layer, QPoint mapCenter, qreal mapScale, 
+PrintJob::PrintJob(Map *m, MapRenderer *r, Cache::Cache &tileCache, QPrinter *p, int layer, QPoint mapCenter, qreal mapScale, 
                    QObject *parent)
   : QObject(parent), map(m), renderer(r), printer(p), layer(layer), done(false)
 {
   renderer->addClient(this);
-  connect(renderer, SIGNAL(tileUpdated()), this, SLOT(tileUpdated()));
+  connect(&tileCache, SIGNAL(tileLoaded()), this, SLOT(tileLoaded()));
   connect(&retryTimer, SIGNAL(timeout()), this, SLOT(tryPrint()));
   
   pageRect = printer->pageRect();
@@ -244,7 +247,7 @@ void PrintJob::tryPrint()
   }
 }
 
-void PrintJob::tileUpdated()
+void PrintJob::tileLoaded()
 {
   if (!retryTimer.isActive()) { retryTimer.start(retryTimeout); }
 }
@@ -263,7 +266,8 @@ void MainWindow::printTriggered(bool)
   qreal scale = (map->mapPixelSize().width() * dpi / metersPerInch)
     / view->currentScale(); 
 
-  PrintJob *job = new PrintJob(map, renderer, &printer, view->currentLayer(), view->center(), scale, this);
+  PrintJob *job = new PrintJob(map, renderer, tileCache, &printer, 
+                               view->currentLayer(), view->center(), scale, this);
   printJobs << job;
 }
 
@@ -601,16 +605,15 @@ void MainWindow::gridChanged(QAction *a)
 
 void MainWindow::newWindowTriggered()
 {
-  MainWindow *m = new MainWindow(map, renderer, networkManager);
+  MainWindow *m = new MainWindow(map, renderer, tileCache, networkManager);
   m->show();
 }
 
 void MainWindow::preferencesTriggered()
 {
-  Cache::Cache &cache = renderer->getCache();
-  PreferencesDialog prefDlg(cache);
+  PreferencesDialog prefDlg(tileCache);
   prefDlg.setDpi(screenDpi);
-  prefDlg.setCacheSizes(cache.getMemCacheSize(), cache.getDiskCacheSize());
+  prefDlg.setCacheSizes(tileCache.getMemCacheSize(), tileCache.getDiskCacheSize());
   prefDlg.setUseOpenGL(usingGL);
   int ret = prefDlg.exec();
 
@@ -618,7 +621,7 @@ void MainWindow::preferencesTriggered()
     return;
 
   screenDpi = prefDlg.getDpi();
-  cache.setCacheSizes(prefDlg.getMemSize(), prefDlg.getDiskSize());
+  tileCache.setCacheSizes(prefDlg.getMemSize(), prefDlg.getDiskSize());
   QSettings settings;
   settings.setValue(settingDpi, screenDpi);
   settings.setValue(settingMemCache, prefDlg.getMemSize());
@@ -960,7 +963,7 @@ void MainWindow::searchResultsReceived()
   pendingSearch = NULL;
 
   if (handler.hasErrors()) {
-    statusBar()->showMessage(tr("Error reading search results"));
+    statusBar()->showMessage(tr("Error reading search results"), statusMessageTimeout);
     setSearchResultsVisible(false);
     return;
   }
@@ -1029,4 +1032,10 @@ void MainWindow::scaleChanged(float scaleFactor)
   qreal scale = (map->mapPixelSize().width() * dpi / metersPerInch)
     / scaleFactor;
   scaleLabel->setText("1:" + QString::number(int(scale)));
+}
+
+
+void MainWindow::cacheIOError(const QString &msg)
+{
+  statusBar()->showMessage(msg, statusMessageTimeout);
 }

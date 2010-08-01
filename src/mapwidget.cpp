@@ -57,7 +57,7 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, bool useGL, QWidget *parent)
   }
 
 
-  connect(r, SIGNAL(tileUpdated()), viewport(), SLOT(update()));
+  connect(&r->getCache(), SIGNAL(tileLoaded()), viewport(), SLOT(update()));
 
   setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);

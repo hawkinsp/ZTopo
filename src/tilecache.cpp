@@ -171,18 +171,14 @@ namespace Cache {
       if (ok) {
         subData = QByteArray(data.constData() + pos, len);
         Cache::decompressObject(key, subData, indexData, tileData);
+        NewDataEvent *ev = new NewDataEvent(key, subData, indexData, tileData);
+        QCoreApplication::postEvent(cache, ev, Qt::LowEventPriority);
+      } else {
+        NewDataEvent *ev = new NewDataEvent(key, reply->errorString());
+        QCoreApplication::postEvent(cache, ev);
       }
 
-      NewDataEvent *ev = new NewDataEvent(key, subData, indexData, tileData);
-      QCoreApplication::postEvent(cache, ev, Qt::LowEventPriority);
       cache->networkRequestFinished();
-
-      if (!ok) {
-        qDebug() << "WARNING: Error reading network object " << key << ": " 
-                 << reply->request().url().toString() << " " 
-                 << reply->error() << reply->errorString();
-      }
-      
       pos += len;
     }
     reply->deleteLater();
@@ -231,7 +227,8 @@ namespace Cache {
           dbData.flags = DB_DBT_USERMEM;
           int ret = cache->objectDb->get(cache->objectDb, NULL, &dbKey, &dbData, 0);
           if (ret != 0) {
-            qWarning() << "Error loading cached object " << req.tile;
+            QString msg = tr("Error loading cached object %1").arg(req.tile);
+            qWarning() << msg;
             data.clear();
           }
           else {
@@ -240,7 +237,8 @@ namespace Cache {
           }
         }
         //        emit(objectLoadedFromDisk(req.tile, indexData, tileData));
-        QCoreApplication::postEvent(cache, new NewDataEvent(req.tile, data, indexData, tileData),
+        QCoreApplication::postEvent(cache, new NewDataEvent(req.tile, data, 
+                                                            indexData, tileData),
                                     Qt::LowEventPriority);
         break;
       }
@@ -259,7 +257,9 @@ namespace Cache {
         if (cache->objectDb) {
           ret = cache->objectDb->put(cache->objectDb, NULL, &dbKey, &dbData, 0);
           if (ret != 0) {
-            qWarning() << "Cache database put failed with return code " << ret;
+            QString msg = tr("Cache DB put failed with return code %1")
+              .arg(ret);
+            qWarning() << msg;
           } else {
             writeMetadata(req.tile, data.size());
           }
@@ -278,13 +278,15 @@ namespace Cache {
 
           int ret = cache->objectDb->del(cache->objectDb, NULL, &dbKey, 0);
           if (ret != 0) {
-            qWarning() << "Cache delete " << req.tile << " failed with return code " 
-                       << ret;
+            QString msg = tr("Cache DB delete of %1 failed with %2").arg(req.tile)
+              .arg(ret);
+            qWarning() << msg;
           }
           ret = cache->timestampDb->del(cache->timestampDb, NULL, &dbKey, 0);
           if (ret != 0) {
-            qWarning() << "Cache timestamp delete " << req.tile << " failed with return code " 
-                       << ret;
+            QString msg = tr("Cache timestamp DB delete of %1 failed with %2")
+              .arg(req.tile).arg(ret);
+            qWarning() << msg;
           }
 
         }      
@@ -333,7 +335,8 @@ namespace Cache {
     if (cache->timestampDb) {
       ret = cache->timestampDb->put(cache->timestampDb, NULL, &dbKey, &dbData, 0);
       if (ret != 0) {
-        qWarning() << "Timestamp put failed with return code " << ret;
+        QString msg = tr("Timestamp put failed with return code %1").arg(ret);
+        qWarning() << msg;
       }
     }
   }
@@ -657,18 +660,26 @@ namespace Cache {
     startNetworkRequests();
   }
 
-  static const QEvent::Type newDataEventType = QEvent::Type(QEvent::registerEventType());
-  NewDataEvent::NewDataEvent(Key key, const QByteArray &data, const QByteArray &indexData, 
-                             const QImage &tileData) 
-    : QEvent(newDataEventType), fKey(key), fData(data), fIndexData(indexData), fTileData(tileData)
+  static const QEvent::Type newDataEventType 
+      = QEvent::Type(QEvent::registerEventType());
+
+  NewDataEvent::NewDataEvent(Key key, const QString &err)
+    : QEvent(newDataEventType), fError(err), fKey(key)
+  {
+  }
+
+  NewDataEvent::NewDataEvent(Key key, const QByteArray &data, 
+                             const QByteArray &indexData, const QImage &tileData) 
+    : QEvent(newDataEventType), fKey(key), fData(data), fIndexData(indexData), 
+      fTileData(tileData)
   {
   }
 
   bool Cache::event(QEvent *ev)
   {
     if (ev->type() == newDataEventType) {
-
       NewDataEvent *nev = (NewDataEvent *)ev;
+
       Key key = nev->key();
       const QByteArray &data = nev->data();
       const QByteArray &indexData = nev->indexData();
@@ -690,7 +701,9 @@ namespace Cache {
         if (!ok) {
           e->state = Disk;
           if (dbEnv) {
-            qDebug() << "WARNING: Could not read disk object " << key;
+            QString msg = tr("Error reading cached object from disk: %1")
+              .arg(nev->errorString());
+            emit(ioError(msg));
           }
           
           addToDiskLRU(*e);
@@ -714,9 +727,12 @@ namespace Cache {
           postIORequest(IORequest(SaveObject, key, data));
         } else {
           // We had a network error; we have no way to restore the tile to a valid
-          // state so we just dump it. If it is wanted again it will be requested again.
-          qDebug() << "WARNING: Error decoding network object " << key;
-      
+          // state so we just dump it. If it is wanted again it will be requested
+          // again.
+          QString msg = tr("Error reading from network: %1")
+            .arg(nev->errorString());
+          emit(ioError(msg));
+
           cacheEntries.remove(key);
           delete e;
         }

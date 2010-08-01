@@ -44,8 +44,7 @@ class MapRendererClient {
 class MapRenderer : public QObject {
   Q_OBJECT
 public:
-  MapRenderer(Map *m, QNetworkAccessManager &mgr, int maxMem, int maxDisk, 
-              const QString &cachePath, QObject *parent = 0);
+  MapRenderer(Map *m, Cache::Cache &tileCache, QObject *parent = 0);
 
   void addClient(MapRendererClient *);
   void removeClient(MapRendererClient *);
@@ -55,7 +54,8 @@ public:
 
 
   // Load the tiles needed to display a given map area at a given scale.
-  // Loading is asynchronous; this function usually returns before the loading takes place.
+  // Loading is asynchronous; this function usually returns before the loading takes 
+  // place.
   // Returns true if all the tiles are present in memory.
   bool loadTiles(int layer, QRect area, qreal scale);
   
@@ -71,13 +71,9 @@ public:
 
   Cache::Cache &getCache() { return tileCache; }
 
-signals:
-  void tileUpdated();
-
 private slots:
   // Prune tiles not needed by any client
   void pruneTiles();
-  void tileLoaded();
 
 private:
   QTimer pruneTimer;
@@ -93,7 +89,7 @@ private:
 
   Map *map;
 
-  Cache::Cache tileCache;
+  Cache::Cache &tileCache;
 
   //  void findTile(Tile key, QPixmap &p, QRect &r);
   void drawTile(Tile key, QPainter &p, const QRect &r);

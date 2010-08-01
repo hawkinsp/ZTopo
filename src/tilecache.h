@@ -178,14 +178,17 @@ namespace Cache {
  
   class NewDataEvent : public QEvent {
   public:
-    NewDataEvent(Key key, const QByteArray &data, const QByteArray &indexData, const QImage &tileData);
+    NewDataEvent(Key key, const QString &error);
+    NewDataEvent(Key key, const QByteArray &data, const QByteArray &indexData, 
+                 const QImage &tileData);
 
     Key key() const { return fKey; }
     const QByteArray &data() const { return fData; }
     const QByteArray &indexData() const { return fIndexData; }
     const QImage &tileData() const { return fTileData; }
-    
+    const QString &errorString() { return fError; }
   private:
+    QString fError;
     Key fKey;
     QByteArray fData, fIndexData;
     QImage fTileData;
@@ -228,6 +231,7 @@ public:
 
 signals:
   void tileLoaded();
+  void ioError(const QString &msg);
 
 private slots:
   void objectSavedToDisk(Key key, bool success);

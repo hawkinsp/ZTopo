@@ -30,6 +30,7 @@
 #include "projection.h"
 #include "maprenderer.h"
 
+class Cache::Cache;
 class QActionGroup;
 class QComboBox;
 class QDockWidget;
@@ -61,7 +62,8 @@ class Grid {
 class PrintJob : public QObject, public MapRendererClient {
   Q_OBJECT;
  public:
-  PrintJob(Map *m, MapRenderer *r, QPrinter *printer, int layer, QPoint mapCenter, qreal mapScale, 
+  PrintJob(Map *m, MapRenderer *r, Cache::Cache &tileCache, 
+           QPrinter *printer, int layer, QPoint mapCenter, qreal mapScale, 
            QObject *parent);
   ~PrintJob();
 
@@ -69,7 +71,7 @@ class PrintJob : public QObject, public MapRendererClient {
   virtual QRect visibleArea() const;
 
  private slots:
-  void tileUpdated();
+  void tileLoaded();
   void tryPrint();
 
  private:
@@ -93,7 +95,8 @@ class MainWindow : public QMainWindow
   Q_OBJECT
 
 public:
-  MainWindow(Map *m, MapRenderer *r, QNetworkAccessManager &mgr, QWidget *parent = 0);
+  MainWindow(Map *m, MapRenderer *r, Cache::Cache &c, QNetworkAccessManager &mgr, 
+             QWidget *parent = 0);
   ~MainWindow();
 
   friend class SearchContentHandler;
@@ -129,9 +132,11 @@ private slots:
   void searchResultsReceived();
   void searchResultActivated(const QModelIndex &);
 
+  void cacheIOError(const QString &msg);
 private:
   Map *map;
   MapRenderer *renderer;
+  Cache::Cache &tileCache;
 
   QNetworkAccessManager &networkManager;
 
