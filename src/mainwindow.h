@@ -35,13 +35,17 @@ class QComboBox;
 class QDockWidget;
 class QLabel;
 class QLineEdit;
-class QRegExpValidator;
+class QModelIndex;
+class QStandardItemModel;
+class QTreeView;
+class QNetworkAccessManager;
 
 class Map;
 class MapRenderer;
 class MapWidget;
 
 class CoordFormatter;
+class SearchContentHandler;
 
 class Grid {
  public:
@@ -89,8 +93,10 @@ class MainWindow : public QMainWindow
   Q_OBJECT
 
 public:
-  MainWindow(Map *m, MapRenderer *r, QWidget *parent = 0);
+  MainWindow(Map *m, MapRenderer *r, QNetworkAccessManager &mgr, QWidget *parent = 0);
   ~MainWindow();
+
+  friend class SearchContentHandler;
 
 protected:
   virtual void closeEvent(QCloseEvent *);
@@ -118,12 +124,17 @@ private slots:
   void pageSetupTriggered(bool);
   void printTriggered(bool);
 
-  void searchEditingFinished();
- 
+  void searchEntered();
+
+  void searchResultsReceived();
+  void searchResultActivated(const QModelIndex &);
 
 private:
   Map *map;
   MapRenderer *renderer;
+
+  QNetworkAccessManager &networkManager;
+
   MapWidget *view;
 
   // Last cursor position in map coordinates.
@@ -140,13 +151,23 @@ private:
 
   QToolBar *toolBar;
 
-  // Status bar
+
+  QString defaultSearchCaption;
+  QLabel *searchCaption;
   QLineEdit *searchLine;
+  QDockWidget *searchDock;
+  QTreeView *resultList;
+  QStandardItemModel *searchResults;
+  QNetworkReply *pendingSearch;
+
+
+  // Status bar
   QLabel *posLabel;     // Current position
   QLabel *scaleLabel;   // Current scale
 
   // Print dock widget
   QDockWidget *printDock;
+
   QPrinter printer;
   QList<PrintJob *> printJobs;
 
@@ -170,6 +191,7 @@ private:
   QAction *minimizeAction;
   QAction *zoomAction;
   QAction *bringFrontAction;
+  QAction *showSearchResults;
   QMenu *windowMenu;
 
   void createActions();
@@ -181,6 +203,8 @@ private:
   CoordFormatter *currentCoordFormatter();
 
   bool usingGL;
+
+  void setSearchResultsVisible(bool);
 
   // Notifications from peer windows
   void windowListChanged();

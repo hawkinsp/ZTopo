@@ -1,5 +1,6 @@
 set(QT_USE_OPENGL TRUE)
 set(QT_USE_NETWORK TRUE)
+set(QT_USE_XML TRUE)
 include(${QT_USE_FILE})
 set(common_SRCS
   projection.cpp
@@ -50,8 +51,14 @@ add_executable(import ${import_SRCS})
 add_executable(merge ${merge_SRCS})
 
 target_link_libraries(ztopo 
-  ${QT_LIBRARIES} qjson ${EXTRA_LIBS} ${QT_QTOPENGL_LIBRARIES}
+  ${QT_LIBRARIES} 
+  qjson 
+  ${EXTRA_LIBS} 
+  ${QT_QTOPENGL_LIBRARIES}
   ${QT_QTNETWORK_LIBRARIES}
-  /opt/local/lib/libproj.a ${Boost_Libraries} db)
+  ${QT_QTXML_LIBRARIES}
+  ${proj_lib}
+  ${Boost_Libraries}
+  db)
 target_link_libraries(import ${QT_LIBRARIES} proj ${GDAL_LIBRARY} qjson)
 target_link_libraries(merge ${QT_LIBRARIES} proj qjson)

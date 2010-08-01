@@ -195,7 +195,8 @@ namespace Cache {
 class Cache : public QObject {
   Q_OBJECT;
 public:
-  Cache(Map *map, int maxMem, int maxDisk, const QString &cachePath);
+  Cache(Map *map, QNetworkAccessManager &mgr, int maxMem, int maxDisk, 
+        const QString &cachePath);
   ~Cache();
 
   int getMemCacheSize() { return maxMemCache; }
@@ -238,7 +239,7 @@ private:
   DB_ENV *dbEnv;
   DB *timestampDb, *objectDb;
 
-  QNetworkAccessManager manager;
+  QNetworkAccessManager &manager;
 
   int maxMemCache;
   int maxDiskCache;

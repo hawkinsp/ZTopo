@@ -32,7 +32,7 @@
 #include "tilecache.h"
 class MapRenderer;
 class QPainterPath;
-
+class QNetworkAccessManager;
 
 class MapRendererClient {
  public:
@@ -44,8 +44,8 @@ class MapRendererClient {
 class MapRenderer : public QObject {
   Q_OBJECT
 public:
-  MapRenderer(Map *m, int maxMem, int maxDisk, const QString &cachePath, 
-              QObject *parent = 0);
+  MapRenderer(Map *m, QNetworkAccessManager &mgr, int maxMem, int maxDisk, 
+              const QString &cachePath, QObject *parent = 0);
 
   void addClient(MapRendererClient *);
   void removeClient(MapRendererClient *);

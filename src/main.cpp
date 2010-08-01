@@ -22,6 +22,7 @@
 #include <QDir>
 #include <QDesktopServices>
 #include <QMetaType>
+#include <QNetworkAccessManager>
 #include <QSettings>
 #include <QStringBuilder>
 #include "mainwindow.h"
@@ -96,10 +97,12 @@ int main(int argc, char **argv)
                       QDesktopServices::storageLocation(QDesktopServices::CacheLocation)).toString();
   QDir::current().mkpath(cachePath);
 
+  QNetworkAccessManager networkManager;
+
   int maxMemCache = settings.value(settingMemCache, 64).toInt();
   int maxDiskCache = settings.value(settingDiskCache, 200).toInt();
-  MapRenderer renderer(map, maxMemCache, maxDiskCache, cachePath);
-  MainWindow *window = new MainWindow(map, &renderer);
+  MapRenderer renderer(map, networkManager, maxMemCache, maxDiskCache, cachePath);
+  MainWindow *window = new MainWindow(map, &renderer, networkManager);
   //  QPixmapCache::setCacheLimit(50000);
 
   window->show();

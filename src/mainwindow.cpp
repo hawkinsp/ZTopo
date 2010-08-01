@@ -29,15 +29,20 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QPageSetupDialog>
 #include <QPrintDialog>
 #include <QPrinter>
 #include <QRegExp>
 #include <QSizeF>
 #include <QSettings>
+#include <QStandardItemModel>
 #include <QStatusBar>
 #include <QStringBuilder>
 #include <QToolBar>
+#include <QTreeView>
+#include <QXmlDefaultHandler>
 #include "mainwindow.h"
 #include "mapwidget.h"
 #include "map.h"
@@ -49,6 +54,7 @@
 
 #include <iostream>
 
+static const int statusMessageTimeout = 10000;
 static const int retryTimeout = 500; // Wait 500ms for tiles to arrive before retrying a print job
 QString settingMemCache = "maxMemCache";
 QString settingDiskCache = "maxDiskCache";
@@ -57,13 +63,18 @@ QString settingUseOpenGL = "useOpenGL";
 
 QVector<MainWindow *> windowList;
 
-MainWindow::MainWindow(Map *m, MapRenderer *r, QWidget *parent)
-  : QMainWindow(parent), map(m), renderer(r), printer(QPrinter::HighResolution)
+MainWindow::MainWindow(Map *m, MapRenderer *r, QNetworkAccessManager &mgr, 
+                       QWidget *parent)
+  : QMainWindow(parent), map(m), renderer(r), networkManager(mgr),
+    pendingSearch(NULL),
+    printer(QPrinter::HighResolution)
 {
   setAttribute(Qt::WA_DeleteOnClose);
   setWindowTitle(tr("Topographic Map Viewer"));
   setUnifiedTitleAndToolBarOnMac(true);
   resize(800, 600);
+
+  defaultSearchCaption = tr("Search for coordinates or places");
 
   readSettings();
 
@@ -277,13 +288,35 @@ void MainWindow::createWidgets()
   statusBar()->addPermanentWidget(scaleLabel);
 
 
+  // Create the search dock widget
+  searchDock = new QDockWidget(tr("Find"), this, Qt::Drawer);
+  searchDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+  QWidget *searchArea = new QWidget(this);
+  QVBoxLayout *searchVBox = new QVBoxLayout;
+  searchArea->setLayout(searchVBox);
+
+  searchResults = new QStandardItemModel;
+  resultList = new QTreeView(searchDock);
+  resultList->setAlternatingRowColors(true);
+  resultList->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  resultList->setSelectionBehavior(QAbstractItemView::SelectRows);
+  resultList->setSelectionMode(QAbstractItemView::SingleSelection);
+  connect(resultList, SIGNAL(activated(const QModelIndex &)),
+          this, SLOT(searchResultActivated(const QModelIndex &)));
+  resultList->setModel(searchResults);
+  searchVBox->addWidget(resultList);
+  searchDock->setWidget(searchArea);
+  searchDock->hide();
+
   // Create the print dock widget
-  printDock = new QDockWidget(tr("Print"), this);
+  /*  printDock = new QDockWidget(tr("Print"), this);
   printDock->setObjectName("PrintDock");
   printDock->setAllowedAreas(Qt::TopDockWidgetArea | Qt::BottomDockWidgetArea);
   printDock->setWidget(new QLabel("hello"));
   printDock->hide();
   addDockWidget(Qt::BottomDockWidgetArea, printDock);
+  */
+
 
 
   // Create the main view
@@ -417,6 +450,12 @@ void MainWindow::createActions()
           this, SLOT(bringFrontTriggered()));
 
   windowActions = NULL;
+
+  showSearchResults = new QAction(tr("Search Results"), this);
+  showSearchResults->setCheckable(true);
+  showSearchResults->setChecked(false);
+  connect(showSearchResults, SIGNAL(toggled(bool)),
+          searchDock, SLOT(setVisible(bool)));
 }
 
 void MainWindow::createMenus()
@@ -426,13 +465,26 @@ void MainWindow::createMenus()
   toolBar->setObjectName("ToolBar");
   toolBar->addAction(zoomInAction);
   toolBar->addAction(zoomOutAction);
+
   QWidget* spacer = new QWidget();
   spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   toolBar->addWidget(spacer);
+
   searchLine = new QLineEdit();
-  connect(searchLine, SIGNAL(editingFinished()), this, SLOT(searchEditingFinished()));
-  toolBar->addWidget(new QLabel(tr("Find:")));
-  toolBar->addWidget(searchLine);
+  connect(searchLine, SIGNAL(returnPressed()), this, SLOT(searchEntered()));
+  QWidget *searchArea = new QWidget(this);
+  QVBoxLayout *searchVBox = new QVBoxLayout;
+  searchVBox->addWidget(searchLine);
+  QFont smallFont;
+  smallFont.setPointSize(10);
+  searchCaption = new QLabel(defaultSearchCaption);
+  searchCaption->setAlignment(Qt::AlignHCenter);
+  searchCaption->setFont(smallFont);
+  searchVBox->addWidget(searchCaption);
+  searchArea->setLayout(searchVBox);
+  toolBar->addWidget(searchArea);
+  
+  toolBar->addAction(showSearchResults);
   addToolBar(toolBar);
 
   // Create the menu bar
@@ -510,6 +562,12 @@ void MainWindow::closeEvent(QCloseEvent *event)
   QMainWindow::closeEvent(event);
 }
 
+void MainWindow::setSearchResultsVisible(bool vis)
+{
+  searchDock->setVisible(vis);
+  showSearchResults->setChecked(vis);
+}
+
 void MainWindow::layerChanged(QAction *a)
 {
   int layer = a->data().toInt();
@@ -543,7 +601,7 @@ void MainWindow::gridChanged(QAction *a)
 
 void MainWindow::newWindowTriggered()
 {
-  MainWindow *m = new MainWindow(map, renderer);
+  MainWindow *m = new MainWindow(map, renderer, networkManager);
   m->show();
 }
 
@@ -649,23 +707,307 @@ CoordFormatter *MainWindow::currentCoordFormatter() {
 }
 
 
-void MainWindow::searchEditingFinished()
+void MainWindow::searchEntered()
 {
   Projection *pjGeo = Geographic::getProjection(currentDatum());
-  QPointF gc = pjGeo->transformFrom(map->projection(), view->center());
+  QPointF centerProj = map->mapToProj().map(view->center());
+  QPointF centerGeo = pjGeo->transformFrom(map->projection(), centerProj);
   QPointF gp;
+  QString query = searchLine->text();
 
+  searchResults->clear();
+  if (query.isEmpty()) {
+    searchCaption->setText(defaultSearchCaption);
+    return;
+  }
+
+  // First try to interpret input as a coordinate
   for (int i = 0; i < coordFormats.size(); i++) {
-    if (coordFormats[i]->parse(currentDatum(), gc, searchLine->text(), gp)) {
+    if (coordFormats[i]->parse(currentDatum(), centerGeo, searchLine->text(), gp)) {
       QPointF p = map->projection()->transformFrom(pjGeo, gp);
       QPoint mp = map->projToMap().map(p).toPoint();
       view->centerOn(mp);
+      setSearchResultsVisible(false);
+      searchCaption->setText(tr("Matching coordinate found"));
       lastCursorPos = mp;
       return;
     }
   }
 
-  statusBar()->showMessage(tr("Unknown coordinates"), 10000);
+  // Otherwise try GNIS search
+  if (pendingSearch) {
+    pendingSearch->abort();
+    pendingSearch = NULL;
+  }
+
+  QUrl url("http://geonames.usgs.gov/pls/gnis/x");
+  url.addQueryItem("fname", "'" % searchLine->text() % "'");
+  url.addQueryItem("state", "'california'");
+  url.addQueryItem("op", "1");
+
+  QNetworkRequest request(url);
+  pendingSearch = networkManager.get(request);
+  connect(pendingSearch, SIGNAL(finished()), this, SLOT(searchResultsReceived()));
+
+  searchCaption->setText(tr("Searching..."));
+}
+
+
+struct SearchResult {
+  QString featureName;
+  QPointF location;
+  QString countyName;
+  QString cellName;
+  QString featureType;
+  int elevation;
+  
+  void clear();
+};
+
+void SearchResult::clear()
+{
+  featureName.clear();
+  location = QPointF(0.0, 0.0);
+  countyName.clear();
+  cellName.clear();
+  featureType.clear();
+  elevation = 0;
+}
+
+enum SearchElement {
+  USGS,
+  FeatureName,
+  Latitude,
+  Longitude,
+  CountyName,
+  CellName,
+  FeatureType,
+  Elevation,
+  IgnoredElement
+};
+
+QHash<QString, SearchElement> searchElements;
+bool initSearchElements() {
+  searchElements.insert("USGS", USGS);
+  searchElements.insert("FEATURE_NAME", FeatureName);
+  searchElements.insert("FEAT_LATITUDE_NMBR", Latitude);
+  searchElements.insert("FEAT_LONGITUDE_NMBR", Longitude);
+  searchElements.insert("CNTY_NAME", CountyName);
+  searchElements.insert("CELL_NAME", CellName);
+  searchElements.insert("FEATURE_TYPE", FeatureType);
+  searchElements.insert("ELEVATION", Elevation);
+
+  searchElements.insert("USGSLIST", IgnoredElement);
+  searchElements.insert("FEATURE_ID_NMBR", IgnoredElement);
+  searchElements.insert("STATE_EQUIVALENT_NAME", IgnoredElement);
+  searchElements.insert("FEAT_LATITUDE_CHAR", IgnoredElement);
+  searchElements.insert("FEAT_LONGITUDE_CHAR", IgnoredElement);
+  return true;
+}
+static bool searchElementsInitialized = initSearchElements();
+
+class SearchHandler : public QXmlDefaultHandler
+{
+public:
+  SearchHandler();
+
+  virtual bool startElement(const QString & namespaceURI, const QString & localName,
+                            const QString & qName, const QXmlAttributes & atts);
+  virtual bool characters(const QString & ch);
+  virtual bool endElement(const QString & namespaceURI, const QString & localName, 
+                          const QString & qName) ;
+  virtual bool fatalError(const QXmlParseException & exception);
+
+  bool hasErrors() const { return errors; }
+  const QList<SearchResult> &results() const { return fResults; }
+
+private:
+  SearchResult currentResult;
+  SearchElement currentElem;
+  QString elemData;
+  QList<SearchResult> fResults;
+  bool errors;
+};
+
+SearchHandler::SearchHandler()
+  : QXmlDefaultHandler()
+{
+  currentElem = IgnoredElement;
+  errors = false;
+}
+
+bool SearchHandler::startElement(const QString &, const QString &, 
+                                 const QString &name, const QXmlAttributes &)
+{
+  assert(searchElementsInitialized);
+
+  if (!searchElements.contains(name)) {
+    qDebug() << "Unknown XML tag in search response " << name;
+    return true;
+  }
+
+  currentElem = searchElements.value(name);
+  elemData.clear();
+
+  if (currentElem == USGS) {
+    currentResult.clear();
+  }
+  
+  return true;
+}
+
+bool SearchHandler::characters(const QString &ch)
+{
+  elemData.append(ch);
+  return true;
+}
+
+bool SearchHandler::endElement(const QString &, const QString &, const QString &name)
+{
+  if (!searchElements.contains(name)) {
+    qDebug() << "Unknown XML tag in search response " << name;
+    return true;
+  }
+  SearchElement elem = searchElements.value(name);
+
+  switch (elem) {
+  case FeatureName:
+    currentResult.featureName = elemData;
+    break;
+  case Latitude: {
+    bool ok;
+    qreal lat = elemData.toDouble(&ok);
+    if (ok) {
+      currentResult.location.setY(lat);
+    } else {
+      qWarning() << "Could not parse latitude " << elemData;
+    }
+    break;
+  }
+  case Longitude: {
+    bool ok;
+    qreal lon = elemData.toDouble(&ok);
+    if (ok) {
+      currentResult.location.setX(lon);
+    } else {
+      qWarning() << "Could not parse longitude " << elemData;
+    }
+    break;
+  }
+  case CountyName:
+    currentResult.countyName = elemData;
+    break;
+  case CellName:
+    currentResult.cellName = elemData;
+    break;
+  case FeatureType:
+    currentResult.featureType = elemData;
+    break;
+  case Elevation: {
+    bool ok;
+    int elevation = elemData.toInt(&ok);
+    if (ok) {
+      currentResult.elevation = elevation;
+    } else {
+      qWarning() << "Could not parse elevation  " << elemData;
+    }
+    break;
+  }
+
+  case USGS:
+    fResults.append(currentResult);
+    break;
+
+  case IgnoredElement:
+    break;
+  }
+  return true;
+}
+
+bool SearchHandler::fatalError (const QXmlParseException & exception)
+ {
+     qWarning() << "Fatal error on line" << exception.lineNumber()
+                << ", column" << exception.columnNumber() << ":"
+                << exception.message();
+
+     return false;
+ }
+
+
+
+void MainWindow::searchResultsReceived()
+{
+  assert(pendingSearch != NULL);
+  
+  if (pendingSearch->error() != 0) {
+    QString msg = tr("Error retrieving search results: %1")
+      .arg(pendingSearch->errorString());
+    statusBar()->showMessage(msg, statusMessageTimeout);  
+    searchCaption->setText(msg);
+    setSearchResultsVisible(false);
+    pendingSearch = NULL;
+    return;
+  }
+  
+  QXmlInputSource source(pendingSearch);
+  QXmlSimpleReader reader;
+  SearchHandler handler;
+  reader.setContentHandler(&handler);
+  reader.setErrorHandler(&handler);
+  reader.parse(source);
+
+  pendingSearch->deleteLater();
+  pendingSearch = NULL;
+
+  if (handler.hasErrors()) {
+    statusBar()->showMessage(tr("Error reading search results"));
+    setSearchResultsVisible(false);
+    return;
+  }
+
+  const QList<SearchResult> &results = handler.results();
+  searchCaption->setText(tr("%1 results found").arg(results.size()));
+
+  if (results.size() == 1) {
+    setSearchResultsVisible(false);
+    Projection *pjGeo = Geographic::getProjection(NAD83);
+    QPointF pProj = map->projection()->transformFrom(pjGeo, results[0].location);
+    QPoint pMap = map->projToMap().map(pProj).toPoint();
+    view->centerOn(pMap);
+  } else if (results.size() > 1) {
+    resultList->setSortingEnabled(false);
+    QList<QString> labels;
+    labels << tr("Name");
+    labels << tr("Type");
+    labels << tr("County");
+    labels << tr("Map Name");
+    searchResults->setHorizontalHeaderLabels(labels);
+    foreach (const SearchResult &r, results) {
+      QList<QStandardItem *> items;
+      QStandardItem *name = new QStandardItem(r.featureName);
+      name->setData(r.location, Qt::UserRole + 1);
+      items << name;
+      items << new QStandardItem(r.featureType);
+      items << new QStandardItem(r.countyName);
+      items << new QStandardItem(r.cellName);
+      searchResults->appendRow(items);
+    }
+    for (int i = 0; i < labels.size(); i++) {
+      resultList->resizeColumnToContents(i);
+    }
+    resultList->setSortingEnabled(true);
+    setSearchResultsVisible(true);
+  }
+}
+
+void MainWindow::searchResultActivated(const QModelIndex &i)
+{
+  QModelIndex name = i.sibling(i.row(), 0);
+  QPointF pGeo = name.data(Qt::UserRole + 1).toPointF();
+  QPointF pProj = map->projection()->transformFrom(Geographic::getProjection(NAD83),
+                                                   pGeo);
+  QPoint pMap = map->projToMap().map(pProj).toPoint();
+  view->centerOn(pMap);
 }
 
 void MainWindow::updatePosition(QPoint m)

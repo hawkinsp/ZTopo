@@ -43,8 +43,9 @@ static const int maxGridLines = 100;
 
 static const int pruneTimeout = 1000;
 
-MapRenderer::MapRenderer(Map *m, int maxMem, int maxDisk, const QString &cachePath, QObject *parent)
-  : QObject(parent), map(m), tileCache(m, maxMem, maxDisk, cachePath)
+MapRenderer::MapRenderer(Map *m, QNetworkAccessManager &mgr, int maxMem, int maxDisk,
+                         const QString &cachePath, QObject *parent)
+  : QObject(parent), map(m), tileCache(m, mgr, maxMem, maxDisk, cachePath)
 {
   for (int d = 0; d < numDatums; d++) {
     for (int z = 0; z < UTM::numZones; z++) {

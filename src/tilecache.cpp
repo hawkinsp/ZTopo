@@ -339,9 +339,11 @@ namespace Cache {
   }
   
   
-  Cache::Cache(Map *m, int maxMem, int maxDisk, const QString &cp)
-    : map(m), cachePath(cp), dbEnv(NULL), timestampDb(NULL), objectDb(NULL),
-      manager(this), maxMemCache(maxMem), 
+  Cache::Cache(Map *m, QNetworkAccessManager &mgr, int maxMem, int maxDisk, 
+               const QString &cp)
+    : map(m), cachePath(cp), dbEnv(NULL), timestampDb(NULL),
+      objectDb(NULL),
+      manager(mgr), maxMemCache(maxMem), 
       maxDiskCache(maxDisk),  diskLRUSize(0), memLRUSize(0),
       diskCacheHits(0), diskCacheMisses(0), memCacheHits(0), memCacheMisses(0), 
     numNetworkBundles(0), numNetworkReqs(0), networkReqSize(0), requestsInFlight(0)
