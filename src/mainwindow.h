@@ -37,6 +37,7 @@ class QDockWidget;
 class QLabel;
 class QLineEdit;
 class QModelIndex;
+class QStackedWidget;
 class QStandardItemModel;
 class QTreeView;
 class QNetworkAccessManager;
@@ -44,6 +45,8 @@ class QNetworkAccessManager;
 class Map;
 class MapRenderer;
 class MapWidget;
+class PrintScene;
+class PrintView;
 
 class CoordFormatter;
 class SearchContentHandler;
@@ -59,29 +62,20 @@ class Grid {
   QString label;
 };
 
-class PrintJob : public QObject, public MapRendererClient {
+class PrintJob : public QObject {
   Q_OBJECT;
  public:
-  PrintJob(Map *m, MapRenderer *r, Cache::Cache &tileCache, 
+  PrintJob(PrintScene *ps, Cache::Cache &tileCache, 
            QPrinter *printer, int layer, QPoint mapCenter, qreal mapScale, 
            QObject *parent);
-  ~PrintJob();
-
-  virtual int currentLayer() const;
-  virtual QRect visibleArea() const;
 
  private slots:
   void tileLoaded();
   void tryPrint();
 
  private:
-  Map *map;
-  MapRenderer *renderer;
+  PrintScene *printScene;
   QPrinter *printer;
-
-  int layer;
-  QRect mapPixelRect, pageRect;
-  qreal scale, scaleX, scaleY;
 
   bool done;
 
@@ -109,7 +103,11 @@ private slots:
   void coordFormatChanged(QAction *);
   void gridChanged(QAction *);
   void layerChanged(QAction *);
+  void viewChanged(QAction *);
   void showRulerTriggered(bool);
+
+
+  void setToolbarVisible(bool);
 
   void zoomInTriggered();
   void zoomOutTriggered();
@@ -122,7 +120,7 @@ private slots:
   void windowActionTriggered(QAction *);
 
   void updatePosition(QPoint pos);
-  void scaleChanged(float scale);
+  void scaleChanged(qreal scale);
 
   void pageSetupTriggered(bool);
   void printTriggered(bool);
@@ -140,7 +138,11 @@ private:
 
   QNetworkAccessManager &networkManager;
 
+  // There are two possible views --- the standard map view and a print preview.
+  QStackedWidget *centralWidgetStack;
   MapWidget *view;
+  PrintView *printView;
+  PrintScene *printScene;
 
   // Last cursor position in map coordinates.
   QPoint lastCursorPos;
@@ -181,6 +183,10 @@ private:
   QAction *printAction;
   QAction *pageSetupAction;
   QAction *closeAction;
+
+  QActionGroup *viewActionGroup;
+  QAction *mapViewAction;
+  QAction *printViewAction;
 
   QActionGroup *layerActionGroup;
   QActionGroup *coordFormatActionGroup;

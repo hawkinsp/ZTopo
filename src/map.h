@@ -165,6 +165,7 @@ public:
   // Best layer to display for a zoom level
   int bestLayerAtLevel(int level) const;
 
+
   int numLayers() const { return layers.size(); }
   const Layer &layer(int id) const { return layers[id]; }
   bool layerById(QString name, int &layer) const;

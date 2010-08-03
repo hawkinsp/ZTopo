@@ -37,6 +37,7 @@
 #include <QRegExp>
 #include <QSizeF>
 #include <QSettings>
+#include <QStackedWidget>
 #include <QStandardItemModel>
 #include <QStatusBar>
 #include <QStringBuilder>
@@ -49,13 +50,18 @@
 #include "maprenderer.h"
 #include "projection.h"
 #include "preferences.h"
+#include "printscene.h"
+#include "printview.h"
 #include "coordformatter.h"
 #include "consts.h"
 
 #include <iostream>
 
 static const int statusMessageTimeout = 10000;
-static const int retryTimeout = 500; // Wait 500ms for tiles to arrive before retrying a print job
+
+// Time to wait for tiles to arrive before retrying a print job
+static const int retryTimeout = 500; 
+
 QString settingMemCache = "maxMemCache";
 QString settingDiskCache = "maxDiskCache";
 QString settingDpi = "screenDpi";
@@ -90,7 +96,7 @@ MainWindow::MainWindow(Map *m, MapRenderer *r, Cache::Cache &c,
   grids << Grid(true, true, 1000,    tr("UTM 1000m"));
   grids << Grid(true, true, 10000,   tr("UTM 10000m"));
   grids << Grid(true, true, 100000,  tr("UTM 100000m"));
-  grids << Grid(true, true, 1000000, tr("UTM 1000000m"));
+  //  grids << Grid(true, true, 1000000, tr("UTM 1000000m"));
   grids << Grid(true, false, 0.5/60.0, tr("30\""));
   grids << Grid(true, false, 1.0/60.0, tr("1'"));
   grids << Grid(true, false, 0.125, tr("7.5'"));
@@ -102,10 +108,12 @@ MainWindow::MainWindow(Map *m, MapRenderer *r, Cache::Cache &c,
   createActions();
   createMenus();
 
-  view->centerOn(QPoint(map->requestedSize().width() / 2, map->requestedSize().height() / 2));
+  view->setDpi(screenDpi);
+  view->centerOn(QPoint(map->requestedSize().width() / 2, 
+                        map->requestedSize().height() / 2));
   connect(view, SIGNAL(positionUpdated(QPoint)), this, SLOT(updatePosition(QPoint)));
-  connect(view, SIGNAL(scaleChanged(float)), this, SLOT(scaleChanged(float)));
-  scaleChanged(view->currentScale());
+  connect(view, SIGNAL(mapScaleChanged(qreal)), this, SLOT(scaleChanged(qreal)));
+  scaleChanged(view->currentMapScale());
   updatePosition(view->center());
 
   windowList << this;
@@ -139,110 +147,37 @@ void MainWindow::pageSetupTriggered(bool)
 {
   QPageSetupDialog dialog(&printer, this);
   dialog.exec();
+  printScene->setPageMetrics(printer);
 }
 
-/*
-void clonePrinter(const QPrinter &from, QPrinter &to)
+PrintJob::PrintJob(PrintScene *ps, Cache::Cache &tileCache, QPrinter *p, 
+                   int layer, QPoint mapCenter, qreal mapScale, QObject *parent)
+  : QObject(parent), printScene(ps), printer(p), done(false)
 {
-  to.setPrinterName(from.printerName());
-  to.setPrinterSelectionOption(from.printerSelectionOption());
-  QSizeF paperSize = from.paperSize(QPrinter::Millimeter);
-  qDebug() << "paper size " << paperSize;
-  to.setPaperSize(paperSize, QPrinter::Millimeter);
+  printScene->setPageMetrics(*printer);
+  printScene->centerMapOn(mapCenter);
+  printScene->setMapLayer(layer);
+  printScene->setMapScale(mapScale);
 
-  to.setCollateCopies(from.collateCopies());
-  to.setColorMode(from.colorMode());
-  to.setCreator(from.creator());
-  to.setDocName(from.docName());
-  to.setDoubleSidedPrinting(from.doubleSidedPrinting());
-  to.setDuplex(from.duplex());
-  to.setFontEmbeddingEnabled(from.fontEmbeddingEnabled());
-  to.setFromTo(from.fromPage(), from.toPage());
-  to.setFullPage(from.fullPage());
-  to.setNumCopies(from.numCopies());
-  to.setOrientation(from.orientation());
-  to.setOutputFileName(from.outputFileName());
-  qreal left, top, right, bottom;
-  from.getPageMargins(&left, &top, &right, &bottom, QPrinter::Millimeter);
-  to.setPageMargins(left, top, right, bottom, QPrinter::Millimeter);
-  to.setPageOrder(from.pageOrder());
-  to.setPaperSource(from.paperSource());
-  to.setPrintProgram(from.printProgram());
-  to.setPrintRange(from.printRange());
-  to.setResolution(from.resolution());
-}
-*/
-
-PrintJob::PrintJob(Map *m, MapRenderer *r, Cache::Cache &tileCache, QPrinter *p, int layer, QPoint mapCenter, qreal mapScale, 
-                   QObject *parent)
-  : QObject(parent), map(m), renderer(r), printer(p), layer(layer), done(false)
-{
-  renderer->addClient(this);
   connect(&tileCache, SIGNAL(tileLoaded()), this, SLOT(tileLoaded()));
   connect(&retryTimer, SIGNAL(timeout()), this, SLOT(tryPrint()));
-  
-  pageRect = printer->pageRect();
 
-  // Size of the page in meters
-  QSizeF pagePhysicalArea(qreal(pageRect.width()) / printer->logicalDpiX() * metersPerInch, 
-                 qreal(pageRect.height()) / printer->logicalDpiY() * metersPerInch);
-
-  // Size of the map area in meters
-  QSizeF mapPhysicalArea = pagePhysicalArea * mapScale;
-
-  // Size of the map area in pixels
-  // QSize mapPixelArea = 
-  // map->mapToProj().mapRect(QRectF(QPointF(0, 0), mapPhysicalArea)).size().toSize();
-  QSizeF mapPixelSize = map->mapPixelSize();
-  QSize mapPixelArea(mapPhysicalArea.width() / mapPixelSize.width(), 
-                     mapPhysicalArea.height() / -mapPixelSize.height());
-
-  QPoint mapPixelTopLeft = mapCenter - QPoint(mapPixelArea.width() / 2, mapPixelArea.height() / 2);
-  mapPixelRect = QRect(mapPixelTopLeft, mapPixelArea);
-
-  scaleX = qreal(pageRect.width()) / mapPixelArea.width();
-  scaleY = qreal(pageRect.height()) / mapPixelArea.height();
-  scale = std::max(scaleX, scaleY);
-
-  /*  qDebug("Print mapScale %f; scale %f", mapScale, scale);
-  qDebug("Logical dpi is %d %d Physical dpi is %d %d\n", printer->logicalDpiX(), printer->logicalDpiY(), 
-         printer->physicalDpiX(), printer->physicalDpiY());
-  qDebug("Page is %d x %d = %f m x %f m\n", pageRect.width(), pageRect.height(), pagePhysicalArea.width(),
-         pagePhysicalArea.height());
-  qDebug("Map is %d x %d = %f m x %f m\n", mapPixelArea.width(), mapPixelArea.height(), mapPhysicalArea.width(),
-         mapPhysicalArea.height());
-  */
   tryPrint();
 }
 
-PrintJob::~PrintJob()
-{
-  //  if (printer) { delete printer; }
-  if (!done)   { renderer->removeClient(this); }
-}
-
-int PrintJob::currentLayer() const {
-  return layer;
-}
-
-QRect PrintJob::visibleArea() const {
-  return mapPixelRect;
-}
 
 void PrintJob::tryPrint()
 {
-  if (!done && renderer->loadTiles(layer, mapPixelRect, scale)) {
+  if (!done && printScene->tilesFinishedLoading()) {
     //   qDebug() << "print job printing" << scale << " " << scaleX << " " << scaleY << " " << mapPixelRect;
     QPainter painter;
     painter.begin(printer);
-    painter.drawRect(0, 0, pageRect.width(), pageRect.height());
-    painter.scale(scaleX / scale, scaleY / scale);
-    renderer->render(painter, layer, mapPixelRect, scale);
+    QRectF pageRect = printer->pageRect();
+    QRectF targetRect(0.0, 0.0, pageRect.width(), pageRect.height());
+    printScene->render(&painter, targetRect, pageRect);
     painter.end();
     
     done = true;
-    renderer->removeClient(this);
-    // delete printer;
     printer = NULL;
   }
 }
@@ -261,13 +196,10 @@ void MainWindow::printTriggered(bool)
 
   //  QPrinter *p = new QPrinter(QPrinter::HighResolution);
   //  clonePrinter(printer, *p);
-  int dpi = (screenDpi <= 0) ? logicalDpiX() : screenDpi;
 
-  qreal scale = (map->mapPixelSize().width() * dpi / metersPerInch)
-    / view->currentScale(); 
-
-  PrintJob *job = new PrintJob(map, renderer, tileCache, &printer, 
-                               view->currentLayer(), view->center(), scale, this);
+  PrintJob *job = new PrintJob(printScene, tileCache, &printer, 
+                               view->currentLayer(), view->center(),
+                               view->currentMapScale(), this);
   printJobs << job;
 }
 
@@ -322,12 +254,19 @@ void MainWindow::createWidgets()
   */
 
 
+  centralWidgetStack = new QStackedWidget;
 
   // Create the main view
   view = new MapWidget(map, renderer, usingGL);
   view->setCursor(Qt::OpenHandCursor);
-  setCentralWidget(view);
+  centralWidgetStack->addWidget(view);
 
+  printScene = new PrintScene(map, renderer, printer);
+  printView = new PrintView(printScene, usingGL);
+  centralWidgetStack->addWidget(printView);
+
+  centralWidgetStack->setCurrentWidget(view);
+  setCentralWidget(centralWidgetStack);
 }
 
 void MainWindow::createActions()
@@ -346,6 +285,21 @@ void MainWindow::createActions()
 
   closeAction = new QAction(tr("&Close"), this);
   connect(closeAction, SIGNAL(triggered(bool)), this, SLOT(close()));
+
+  // Regular vs print view
+  viewActionGroup = new QActionGroup(this);
+  mapViewAction = new QAction(tr("Map View"), this);
+  mapViewAction->setCheckable(true);
+  mapViewAction->setData(0);
+  viewActionGroup->addAction(mapViewAction);
+  printViewAction = new QAction(tr("Print View"), this);
+  printViewAction->setCheckable(true);
+  printViewAction->setData(1);
+  viewActionGroup->addAction(printViewAction);
+  mapViewAction->setChecked(true);
+  connect(viewActionGroup, SIGNAL(triggered(QAction *)),
+          this, SLOT(viewChanged(QAction *)));
+
 
   // Map Layers
   layerActionGroup = new QActionGroup(this);
@@ -420,7 +374,7 @@ void MainWindow::createActions()
   showToolBarAction->setCheckable(true);
   showToolBarAction->setChecked(true);
   connect(showToolBarAction, SIGNAL(toggled(bool)),
-          toolBar, SLOT(setVisible(bool)));
+          this, SLOT(setToolbarVisible(bool)));
 
   showStatusBarAction = new QAction(tr("Show &Status Bar"), this);
   showStatusBarAction->setCheckable(true);
@@ -460,6 +414,11 @@ void MainWindow::createActions()
   showSearchResults->setChecked(false);
   connect(showSearchResults, SIGNAL(toggled(bool)),
           searchDock, SLOT(setVisible(bool)));
+}
+
+void MainWindow::setToolbarVisible(bool vis)
+{
+  toolBar->setVisible(vis);
 }
 
 void MainWindow::createMenus()
@@ -505,6 +464,9 @@ void MainWindow::createMenus()
 #endif
 
   QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
+  viewMenu->addAction(mapViewAction);
+  viewMenu->addAction(printViewAction);
+  viewMenu->addSeparator();
   viewMenu->addAction(preferencesAction);
   viewMenu->addSeparator();
   viewMenu->addAction(showToolBarAction);
@@ -572,6 +534,24 @@ void MainWindow::setSearchResultsVisible(bool vis)
   showSearchResults->setChecked(vis);
 }
 
+void MainWindow::viewChanged(QAction *a)
+{
+  switch (a->data().toInt()) {
+  case 0: //
+    centralWidgetStack->setCurrentIndex(0);
+    break;
+  case 1:
+    printScene->setPageMetrics(printer);
+    printScene->setMapScale(view->currentMapScale());
+    printScene->setMapLayer(view->currentLayer());
+    printScene->centerMapOn(view->center());
+    printView->fitToView();
+    centralWidgetStack->setCurrentIndex(1);
+    break;
+  default: qFatal("Unknown view ID in viewChanged");
+  }
+}
+
 void MainWindow::layerChanged(QAction *a)
 {
   int layer = a->data().toInt();
@@ -597,8 +577,10 @@ void MainWindow::gridChanged(QAction *a)
   int g = a->data().toInt();
   if (grids[g].enabled) {
     view->showGrid(currentDatum(), grids[g].utm, grids[g].interval);
+    printScene->showGrid(currentDatum(), grids[g].utm, grids[g].interval);
   } else {
     view->hideGrid();
+    printScene->hideGrid();
   }
 }
 
@@ -621,6 +603,7 @@ void MainWindow::preferencesTriggered()
     return;
 
   screenDpi = prefDlg.getDpi();
+  view->setDpi(screenDpi);
   tileCache.setCacheSizes(prefDlg.getMemSize(), prefDlg.getDiskSize());
   QSettings settings;
   settings.setValue(settingDpi, screenDpi);
@@ -659,6 +642,7 @@ void MainWindow::glPreferenceChanged(bool useGL)
 {
   usingGL = useGL;
   view->setGL(useGL);
+  printView->setGL(useGL);
 }
 
 void MainWindow::windowActionTriggered(QAction *a)
@@ -1024,16 +1008,10 @@ void MainWindow::updatePosition(QPoint m)
   posLabel->setText(currentCoordFormatter()->format(d, g));
 }
 
-void MainWindow::scaleChanged(float scaleFactor)
+void MainWindow::scaleChanged(qreal mapScale)
 {
-  //  printf("dpi %d %d phys %d %d\n", logicalDpiX(), logicalDpiY(), physicalDpiX(), physicalDpiY());
-  int dpi = (screenDpi <= 0) ? logicalDpiX() : screenDpi;
-
-  qreal scale = (map->mapPixelSize().width() * dpi / metersPerInch)
-    / scaleFactor;
-  scaleLabel->setText("1:" + QString::number(int(scale)));
+  scaleLabel->setText("1:" + QString::number(int(mapScale)));
 }
-
 
 void MainWindow::cacheIOError(const QString &msg)
 {

@@ -39,6 +39,7 @@ public:
   MapWidget(Map *m, MapRenderer *r, bool useGL, QWidget *parent = 0);
   ~MapWidget();
 
+  void setDpi(int dpi);
 
   // Center on a point in map coordinates
   void centerOn(QPoint p);
@@ -46,6 +47,9 @@ public:
   // Set the current scale factor
   qreal currentScale() const { return bumpedScale; }
   void setScale(qreal scale);
+
+  // Return the current physical map scale (e.g. 24000 means 1:24000)
+  qreal currentMapScale() const;
 
   // Show/hide ruler
   void setRulerVisible(bool vis);
@@ -78,7 +82,7 @@ public:
 
 signals:
   void positionUpdated(QPoint pos);
-  void scaleChanged(float scale);
+  void mapScaleChanged(qreal scale);
 
 protected:
   virtual void paintEvent(QPaintEvent *event);
@@ -125,8 +129,9 @@ private:
   void updateScrollBars();
   void zoomChanged();
 
-  int zoomLevel() const;
   int maxLevel() const { return map->maxLevel(); }
+
+  int dpi;
 };
 
 #endif

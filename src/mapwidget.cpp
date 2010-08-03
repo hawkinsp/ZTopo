@@ -45,17 +45,14 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, bool useGL, QWidget *parent)
   scaleFactor = minScale * 3.0;
   scaleStep = 1.0;
 
+  setDpi(0);
+
   panning = false;
 
   gridEnabled = false;
   showRuler = true;
 
-  if (useGL) {
-    setViewport(new QGLWidget(QGLFormat(QGL::SampleBuffers)));
-  } else {
-    setViewport(new QWidget());
-  }
-
+  setGL(useGL);
 
   connect(&r->getCache(), SIGNAL(tileLoaded()), viewport(), SLOT(update()));
 
@@ -71,6 +68,15 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, bool useGL, QWidget *parent)
 MapWidget::~MapWidget()
 {
   renderer->removeClient(this);
+}
+
+void MapWidget::setDpi(int aDpi)
+{
+  if (dpi <= 0) {
+    dpi = logicalDpiX();
+  }
+  dpi = aDpi;
+  emit(mapScaleChanged(currentMapScale()));
 }
 
 void MapWidget::setGL(bool useGL) 
@@ -111,7 +117,7 @@ void MapWidget::zoomChanged()
 
   updateScrollBars();
 
-  emit(scaleChanged(scaleFactor * scaleStep));
+  emit(mapScaleChanged(currentMapScale()));
   tilesChanged();
 }
 
@@ -209,6 +215,12 @@ int MapWidget::currentLayer() const
   return layer;
 }
 
+qreal MapWidget::currentMapScale() const
+{
+  return (map->mapPixelSize().width() * dpi / metersPerInch)
+    / currentScale();
+}
+
 void MapWidget::tilesChanged()
 {
   QRect vis(visibleArea());
@@ -227,6 +239,9 @@ void MapWidget::paintEvent(QPaintEvent *ev)
   p.setRenderHint(QPainter::SmoothPixmapTransform, smoothScaling);
   renderer->render(p, currentLayer(), mr, currentScale());
   if (gridEnabled) {
+    QPen pen(QColor(qRgb(0, 0, 255)));
+    pen.setWidth(0);
+    p.setPen(pen);
     if (gridUTM) {
       renderer->renderUTMGrid(p, mr, currentScale(), gridDatum, gridInterval);
     } else {

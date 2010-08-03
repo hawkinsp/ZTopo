@@ -14,6 +14,8 @@ set(ztopo_SRCS
   maprenderer.cpp
   mapwidget.cpp
   preferences.cpp
+  printscene.cpp
+  printview.cpp
   tilecache.cpp
   ${common_SRCS})
 set(ztopo_MOC_HDRS
@@ -22,6 +24,8 @@ set(ztopo_MOC_HDRS
   mapwidget.h
   tilecache.h
   preferences.h
+  printscene.h
+  printview.h
 )
 set(ztopo_RCCS
   resources.qrc

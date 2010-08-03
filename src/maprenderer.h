@@ -60,6 +60,8 @@ public:
   bool loadTiles(int layer, QRect area, qreal scale);
   
   // Render an area of a map layer onto a paint device at a given scale
+  // Does not clip precisely to the map boundary; the area drawn may lie over
+  // the edge of the map area.
   void render(QPainter &p, int layer, QRect area, qreal scale);
 
   void renderRuler(QPainter &p, int width, qreal scale);

@@ -245,7 +245,7 @@ void MapRenderer::renderUTMGrid(QPainter &p, QRect mRect, qreal scale,
     Projection *pj = UTM::getZoneProjection(d, zone);
 
     p.save();
-    p.setClipPath(*getUTMZoneBoundary(d, zone));
+    p.setClipPath(*getUTMZoneBoundary(d, zone), Qt::IntersectClip);
     renderGrid(p, mRect, pj, interval);
     p.restore();
   }
@@ -295,13 +295,11 @@ void MapRenderer::renderGrid(QPainter &p, QRect area,
   }
 
 
-  QPen pen(QColor(qRgb(0, 0, 255)));
-  pen.setWidth(0);
   p.save();
   //  p.setOpacity(0.7);
   p.setCompositionMode(QPainter::CompositionMode_SourceOver);
   p.setRenderHint(QPainter::Antialiasing, true);
-  p.setPen(pen);
+
 
   p.drawLines(lines);
   p.restore();
