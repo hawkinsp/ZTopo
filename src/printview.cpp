@@ -40,8 +40,7 @@ PrintView::PrintView(PrintScene *scene, bool useGL, QWidget *parent)
 
   scaleFactor = scaleStep = 1.0;
   calculateScales();
-  scaleFactor = fitToViewScale;
-  scale(scaleFactor, scaleFactor);
+  fitToView();
   setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
 }
 
@@ -73,6 +72,8 @@ void PrintView::calculateScales()
 
 void PrintView::fitToView()
 {
+  resetTransform();
+  scaleFactor = scaleStep = 1.0;
   qreal delta = fitToViewScale / scaleFactor * scaleStep * 0.98;
   scale(delta, delta);
 }

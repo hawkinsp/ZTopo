@@ -260,7 +260,6 @@ void MainWindow::createWidgets()
 
   // Create the main view
   view = new MapWidget(map, renderer, usingGL);
-  view->setCursor(Qt::OpenHandCursor);
   centralWidgetStack->addWidget(view);
 
   printScene = new PrintScene(map, renderer, printer);

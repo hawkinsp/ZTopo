@@ -93,8 +93,9 @@ protected:
   virtual void paintEvent(QPaintEvent *event);
   virtual bool event(QEvent *event);
   virtual void mouseDoubleClickEvent(QMouseEvent * e);
-  virtual void mousePressEvent(QMouseEvent *event);
   virtual void mouseMoveEvent(QMouseEvent *event);
+  virtual void mousePressEvent(QMouseEvent *event);
+  virtual void mouseReleaseEvent(QMouseEvent *event);
   virtual void resizeEvent(QResizeEvent *event);
   virtual void scrollContentsBy(int dx, int dy);
 

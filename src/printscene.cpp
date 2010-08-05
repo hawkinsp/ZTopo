@@ -20,6 +20,7 @@
 #include <QDebug>
 #include <QGraphicsItem>
 #include <QGraphicsRectItem>
+#include <QGraphicsSceneMouseEvent>
 #include <QPainter>
 #include <QPrinter>
 #include <QStyleOptionGraphicsItem>
@@ -63,6 +64,11 @@ public:
 
   bool loadTiles();
 
+protected:
+  virtual void mousePressEvent(QGraphicsSceneMouseEvent *);
+  virtual void mouseReleaseEvent(QGraphicsSceneMouseEvent *);
+  virtual void mouseMoveEvent(QGraphicsSceneMouseEvent *);
+
 private:
   Map *map;
   MapRenderer *renderer;
@@ -81,12 +87,18 @@ private:
   qreal gridInterval;
 
   void computeGeometry();
+
+  // Convert a point from item coordinates to map coordinates
+  QPointF itemToMap(QPointF);
 };
 
 
 MapItem::MapItem(Map *m, MapRenderer *r, QGraphicsItem *parent)
   : QGraphicsItem(parent), map(m), renderer(r)
 {
+  setAcceptedMouseButtons(Qt::LeftButton);
+  setCursor(Qt::OpenHandCursor);
+
   renderer->addClient(this);
   mapLayer = 0;
   mapScale = 24000;
@@ -149,8 +161,12 @@ void MapItem::computeGeometry()
   qDebug("Map is %d x %d = %f m x %f m\n", mapPixelArea.width(), mapPixelArea.height(), mapPhysicalArea.width(),
          mapPhysicalArea.height());
          qDebug() << mapCenter;*/
-  update();
-  
+  update();  
+}
+
+QPointF MapItem::itemToMap(QPointF p)
+{
+  return (p / scale) + mapPixelRect.topLeft();
 }
 
 bool MapItem::loadTiles()
@@ -163,7 +179,7 @@ void MapItem::paint(QPainter *painter, const QStyleOptionGraphicsItem * option,
 {
   qreal detail = QStyleOptionGraphicsItem::levelOfDetailFromTransform(
                       painter->worldTransform());
-  qDebug() << "painter" << option->exposedRect << gridEnabled << detail;
+  //  qDebug() << "painter" << option->exposedRect << gridEnabled << detail;
   loadTiles();
   painter->setBackground(Qt::white);
   painter->eraseRect(itemRect);
@@ -222,6 +238,30 @@ void MapItem::hideGrid()
 {
   gridEnabled = false;
   update();
+}
+
+void MapItem::mouseMoveEvent(QGraphicsSceneMouseEvent *ev)
+{
+  if (ev->buttons() & Qt::LeftButton) {
+    QPointF before = itemToMap(ev->lastPos());
+    QPointF after = itemToMap(ev->pos());
+    QPointF delta = after - before;
+    qDebug() << ev->pos() << "delta" << delta;
+    centerOn((mapPixelRect.center() - delta).toPoint());
+  }
+}
+
+void MapItem::mousePressEvent(QGraphicsSceneMouseEvent *ev)
+{
+  QGraphicsItem::mousePressEvent(ev);
+  setCursor(Qt::ClosedHandCursor);
+  ev->accept();
+}
+
+void MapItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *ev)
+{
+  QGraphicsItem::mouseReleaseEvent(ev);
+  setCursor(Qt::OpenHandCursor);
 }
 
 

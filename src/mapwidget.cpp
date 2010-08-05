@@ -64,6 +64,7 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, bool useGL, QWidget *parent)
   grabGesture(Qt::PinchGesture);
   zoomChanged();
 
+  setCursor(Qt::OpenHandCursor);
   flagPixmap = QPixmap(":/images/flag.png");
 }
 
@@ -158,7 +159,15 @@ void MapWidget::mousePressEvent(QMouseEvent *ev)
 {
   QAbstractScrollArea::mousePressEvent(ev);
   lastMousePos = ev->pos();
+  setCursor(Qt::ClosedHandCursor);
 }
+
+void MapWidget::mouseReleaseEvent(QMouseEvent *ev)
+{
+  QAbstractScrollArea::mouseReleaseEvent(ev);
+  setCursor(Qt::OpenHandCursor);
+}
+
 
 void MapWidget::mouseMoveEvent(QMouseEvent *ev)
 {
