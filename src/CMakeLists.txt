@@ -16,6 +16,7 @@ set(ztopo_SRCS
   preferences.cpp
   printscene.cpp
   printview.cpp
+  searchhandler.cpp
   tilecache.cpp
   ${common_SRCS})
 set(ztopo_MOC_HDRS

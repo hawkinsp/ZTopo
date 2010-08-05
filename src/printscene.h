@@ -37,8 +37,8 @@ private slots:
 
 
 private:
-  QGraphicsRectItem *paperRect;
-  QGraphicsRectItem *pageRect;
+  QGraphicsRectItem *paperRectItem;
+  QGraphicsRectItem *pageRectItem;
   MapItem *mapItem;
 };
 

@@ -22,6 +22,7 @@
 #include <QGraphicsRectItem>
 #include <QPainter>
 #include <QPrinter>
+#include <QStyleOptionGraphicsItem>
 #include "consts.h"
 #include "printscene.h"
 #include "map.h"
@@ -160,6 +161,9 @@ bool MapItem::loadTiles()
 void MapItem::paint(QPainter *painter, const QStyleOptionGraphicsItem * option, 
                      QWidget * widget)
 {
+  qreal detail = QStyleOptionGraphicsItem::levelOfDetailFromTransform(
+                      painter->worldTransform());
+  qDebug() << "painter" << option->exposedRect << gridEnabled << detail;
   loadTiles();
   painter->setBackground(Qt::white);
   painter->eraseRect(itemRect);
@@ -178,17 +182,20 @@ void MapItem::paint(QPainter *painter, const QStyleOptionGraphicsItem * option,
   painter->setClipRect(mapRect);
 
   painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
-  painter->scale(scaleX / scale, scaleY / scale);
-  renderer->render(*painter, mapLayer, mapPixelRect, scale);
+  painter->scale(scaleX / scale / detail, scaleY / scale / detail);
+  painter->save();
+  //  painter->scale(1.0 / detail, 1.0 / detail);
+  renderer->render(*painter, mapLayer, mapPixelRect, scale * detail);
+  painter->restore();
 
   if (gridEnabled) {
     QPen pen(Qt::blue);
-    pen.setWidthF(borderWidth/2);
+    pen.setWidthF(borderWidth * detail);
     painter->setPen(pen);
     if (gridUTM) {
-      renderer->renderUTMGrid(*painter, mapPixelRect, scale, gridDatum, gridInterval);
+      renderer->renderUTMGrid(*painter, mapPixelRect, scale * detail, gridDatum, gridInterval);
     } else {
-      renderer->renderGeographicGrid(*painter, mapPixelRect, scale, gridDatum, 
+      renderer->renderGeographicGrid(*painter, mapPixelRect, scale * detail, gridDatum, 
                                      gridInterval);
     }
   }
@@ -223,12 +230,12 @@ PrintScene::PrintScene(Map *m, MapRenderer *r, const QPrinter &printer)
 {
   setBackgroundBrush(Qt::gray);
 
-  paperRect = addRect(printer.paperRect(), QColor(Qt::black), Qt::white);
-  pageRect = new QGraphicsRectItem(paperRect);
-  pageRect->setPen(QColor(Qt::white));
-  pageRect->setBrush(Qt::white);
+  paperRectItem = addRect(printer.paperRect(), QColor(Qt::black), Qt::white);
+  pageRectItem = new QGraphicsRectItem(paperRectItem);
+  pageRectItem->setPen(QColor(Qt::white));
+  pageRectItem->setBrush(Qt::white);
 
-  mapItem = new MapItem(m, r, pageRect);
+  mapItem = new MapItem(m, r, pageRectItem);
 
   setPageMetrics(printer);
 
@@ -238,9 +245,15 @@ PrintScene::PrintScene(Map *m, MapRenderer *r, const QPrinter &printer)
 
 void PrintScene::setPageMetrics(const QPrinter &printer)
 {
-  paperRect->setRect(printer.paperRect());
-  pageRect->setRect(printer.pageRect());
-  mapItem->setRect(printer.pageRect());
+  qDebug() << "page" << printer.pageRect();
+  qDebug() << "paper" << printer.paperRect();
+  QRectF pageRect(printer.pageRect());
+  paperRectItem->setRect(printer.paperRect());
+  pageRectItem->setPos(pageRect.topLeft());
+  QRectF mapRect(0, 0, printer.pageRect().width(), printer.pageRect().height());
+  pageRectItem->setRect(mapRect);
+  mapItem->setRect(mapRect);
+  //  mapItem->setRect(printer.pageRect());
   mapItem->setDpi(printer.logicalDpiX(), printer.logicalDpiY());
 }
 

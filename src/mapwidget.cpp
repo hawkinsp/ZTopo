@@ -63,6 +63,8 @@ MapWidget::MapWidget(Map *m, MapRenderer *r, bool useGL, QWidget *parent)
   smoothScaling = true;
   grabGesture(Qt::PinchGesture);
   zoomChanged();
+
+  flagPixmap = QPixmap(":/images/flag.png");
 }
 
 MapWidget::~MapWidget()
@@ -140,6 +142,16 @@ bool MapWidget::gestureEvent(QGestureEvent *ev)
   } else {
     return QAbstractScrollArea::event(ev);
   }
+}
+
+void MapWidget::mouseDoubleClickEvent(QMouseEvent *ev)
+{
+  QAbstractScrollArea::mouseDoubleClickEvent(ev);
+  QPoint screenCenter(center());
+  QPoint pointBeforeScale = viewToMap(ev->pos());
+  zoomIn();
+  QPoint pointAfterScale = viewToMap(ev->pos());
+  centerOn(screenCenter + pointBeforeScale - pointAfterScale);
 }
 
 void MapWidget::mousePressEvent(QMouseEvent *ev)
@@ -238,6 +250,8 @@ void MapWidget::paintEvent(QPaintEvent *ev)
   p.eraseRect(p.viewport());
   p.setRenderHint(QPainter::SmoothPixmapTransform, smoothScaling);
   renderer->render(p, currentLayer(), mr, currentScale());
+
+  // Draw the grid
   if (gridEnabled) {
     QPen pen(QColor(qRgb(0, 0, 255)));
     pen.setWidth(0);
@@ -249,6 +263,19 @@ void MapWidget::paintEvent(QPaintEvent *ev)
                                      gridInterval);
     }
   }
+
+  // Draw search results
+  if (searchResultsVisible) {
+    foreach (QPoint mp, searchResults) {
+      if (mr.contains(mp)) {
+        QPoint v = mapToView(mp);
+        QPointF origin(v.x() - flagPixmap.width() / 2, v.y() - flagPixmap.height());
+        p.drawPixmap(origin, flagPixmap);
+      }
+    }
+  }
+
+  // Draw the ruler
   if (showRuler) {
     p.save();
     p.translate(5, vr.height() - 30);
@@ -289,6 +316,17 @@ void MapWidget::setScale(qreal scale)
   viewport()->update();
 }
 
+static const qreal zoomIncrement = 1.333;
+void MapWidget::zoomIn()
+{
+  setScale(currentScale() * zoomIncrement);
+}
+
+void MapWidget::zoomOut()
+{
+  setScale(currentScale() / zoomIncrement);
+}
+
 void MapWidget::setRulerVisible(bool v)
 {
   showRuler = v;
@@ -301,13 +339,18 @@ QPoint MapWidget::center() const
   return QPoint(horizontalScrollBar()->value(), verticalScrollBar()->value());
 }
 
+QPoint MapWidget::mapToView(QPoint p) const
+{
+  return (QPointF(p - viewTopLeft()) * currentScale()).toPoint();
+}
+
 
 QPoint MapWidget::viewToMap(QPoint p) const
 {
   return viewTopLeft() + QPoint(p.x() / currentScale(), p.y() / currentScale());
 }
 
-QRect MapWidget::viewToMapRect(QRect r) const
+QRect MapWidget::viewToMap(QRect r) const
 {
   return QRect(r.x() / currentScale(), r.y() / currentScale(), 
                r.width() / currentScale(), 
@@ -349,5 +392,17 @@ void MapWidget::showGrid(Datum d, bool utm, qreal interval)
 void MapWidget::hideGrid()
 {
   gridEnabled = false;
+  viewport()->update();
+}
+
+void MapWidget::setSearchResults(const QList<QPoint> &ps)
+{
+  searchResults = ps;
+  if (searchResultsVisible) viewport()->update();
+}
+
+void MapWidget::setSearchResultsVisible(bool vis)
+{
+  searchResultsVisible = vis;
   viewport()->update();
 }

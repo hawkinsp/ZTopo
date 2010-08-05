@@ -32,6 +32,7 @@ PrintView::PrintView(PrintScene *scene, bool useGL, QWidget *parent)
 {
   setGL(useGL);
   
+  setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
   grabGesture(Qt::PinchGesture);
   
   connect(scene, SIGNAL(sceneRectChanged(const QRectF &)),
@@ -41,7 +42,6 @@ PrintView::PrintView(PrintScene *scene, bool useGL, QWidget *parent)
   calculateScales();
   scaleFactor = fitToViewScale;
   scale(scaleFactor, scaleFactor);
-  smoothScaling = true;
   setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
 }
 
@@ -106,7 +106,7 @@ void PrintView::pinchGestureEvent(QPinchGesture *g)
   case Qt::GestureStarted:
     scaleStep = g->scaleFactor();
     smoothScaling = false;
-    gestureViewCenter = mapToScene(rect().center());
+    setRenderHints(QPainter::Antialiasing);
     break;
 
   case Qt::GestureUpdated:
@@ -118,7 +118,7 @@ void PrintView::pinchGestureEvent(QPinchGesture *g)
   case Qt::GestureFinished:
     scaleFactor = std::max(minScale, std::min(maxScale, oldScale));
     scaleStep = 1.0;
-    smoothScaling = true;
+    setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
     break;
     
   case Qt::GestureCanceled:
@@ -131,12 +131,8 @@ void PrintView::pinchGestureEvent(QPinchGesture *g)
   if (scaleFactor * scaleStep < minScale) scaleStep = minScale / scaleFactor;
   else if (scaleFactor * scaleStep > maxScale) scaleStep = maxScale / scaleFactor;
 
-  QPointF pointBeforeScale = mapToScene(g->startCenterPoint().toPoint());
   qreal deltaScale = scaleFactor * scaleStep / oldScale;
   scale(deltaScale, deltaScale);
-  QPointF pointAfterScale = mapToScene(g->startCenterPoint().toPoint());
-  gestureViewCenter = gestureViewCenter + pointBeforeScale - pointAfterScale;
-  centerOn(gestureViewCenter);
 }
 
 

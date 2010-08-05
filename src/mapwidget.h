@@ -21,6 +21,7 @@
 #define MAPWIDGET_H 1
 
 #include <QAbstractScrollArea>
+#include <QList>
 #include <QMap>
 #include <QPair>
 #include <QPixmap>
@@ -58,17 +59,16 @@ public:
   void showGrid(Datum d, bool utm, qreal interval);
   void hideGrid();
 
+  // Search results. Results are a list of points in the map coordinate space.
+  void setSearchResults(const QList<QPoint> &points);
+  void setSearchResultsVisible(bool);
+
 
   // Top left of the view in map coordinates
   QPoint viewTopLeft() const;
 
   // Center of the view in map coordinates
   QPoint center() const;
-
-
-  // Convert view coordinates to map coordinates
-  QPoint viewToMap(QPoint v) const;
-  QRect viewToMapRect(QRect v) const;
 
   // Visible area in map coordinates
   virtual QRect visibleArea() const;
@@ -80,6 +80,11 @@ public:
   // Use OpenGL?
   void setGL(bool use);
 
+public slots:
+  void zoomIn();
+  void zoomOut();
+
+
 signals:
   void positionUpdated(QPoint pos);
   void mapScaleChanged(qreal scale);
@@ -87,6 +92,7 @@ signals:
 protected:
   virtual void paintEvent(QPaintEvent *event);
   virtual bool event(QEvent *event);
+  virtual void mouseDoubleClickEvent(QMouseEvent * e);
   virtual void mousePressEvent(QMouseEvent *event);
   virtual void mouseMoveEvent(QMouseEvent *event);
   virtual void resizeEvent(QResizeEvent *event);
@@ -121,6 +127,12 @@ private:
   bool gridUTM;
   qreal gridInterval;
 
+
+  // Search results
+  QList<QPoint> searchResults;
+  bool searchResultsVisible;
+  QPixmap flagPixmap;
+
   bool gestureEvent(QGestureEvent *ev);
   void pinchGestureEvent(QPinchGesture *g);
 
@@ -129,9 +141,16 @@ private:
   void updateScrollBars();
   void zoomChanged();
 
+
   int maxLevel() const { return map->maxLevel(); }
 
   int dpi;
+
+  // Convert view coordinates to map coordinates
+  QPoint viewToMap(QPoint v) const;
+  QRect viewToMap(QRect v) const;
+
+  QPoint mapToView(QPoint v) const;
 };
 
 #endif

@@ -1,5 +1,7 @@
  <!DOCTYPE RCC><RCC version="1.0">
  <qresource>
+     <file>../images/edit-find.png</file>
+     <file>../images/flag.png</file>
      <file>../images/zoom-in.png</file>
      <file>../images/zoom-out.png</file>
      <file>../config/root.json</file>

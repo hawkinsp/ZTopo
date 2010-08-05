@@ -214,10 +214,18 @@ void MapRenderer::renderGeographicGrid(QPainter &p, QRect area, qreal scale,
   Projection *pj = Geographic::getProjection(d);
 
   p.save();
+  p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+  p.setRenderHint(QPainter::Antialiasing, true);
+
   p.scale(scale, scale);
   p.translate(-QPointF(area.topLeft()));
   p.setTransform(map->projToMap(), true);
+
+  QPen pen = p.pen();
+  pen.setWidthF(pen.widthF() / scale);
+  p.setPen(pen);
   renderGrid(p, area, pj, interval);
+
   p.restore();
 }
 
@@ -237,9 +245,17 @@ void MapRenderer::renderUTMGrid(QPainter &p, QRect mRect, qreal scale,
   }
 
   p.save();
+  p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+  p.setRenderHint(QPainter::Antialiasing, true);
+
   p.scale(scale, scale);
   p.translate(-QPointF(mRect.topLeft()));
   p.setTransform(map->projToMap(), true);
+
+  QPen pen = p.pen();
+  pen.setWidthF(pen.widthF() / scale);
+  p.setPen(pen);
+
 
   for (int zone = minZone; zone <= maxZone; zone++) {
     Projection *pj = UTM::getZoneProjection(d, zone);
@@ -268,8 +284,10 @@ void MapRenderer::renderGrid(QPainter &p, QRect area,
   int gridMaxX = std::ceil(gridBounds.right() / interval) + 1;
   int gridMaxY = std::ceil(gridBounds.bottom() / interval) + 1;
 
-  if (gridMaxX - gridMinX > maxGridLines || gridMaxY - gridMinY > maxGridLines)
+  if (gridMaxX - gridMinX > maxGridLines || gridMaxY - gridMinY > maxGridLines) {
+    //    qDebug() << "Too many grid lines";
     return;
+  }
 
   //  printf("grid bounds %f %f %f %f\n", gridBounds.left(), gridBounds.top(),
   //       gridBounds.right(), gridBounds.bottom());
@@ -285,8 +303,6 @@ void MapRenderer::renderGrid(QPainter &p, QRect area,
         pjMap->transformFrom(pjGrid, QPointF(x * interval, (y + 1) * interval));
 
       //      printf("adding lines at %f %f %f\n", x * interval, y * interval, interval);
-
-
       //      printf("adding line %f %f to %f %f and %f %f to %f %f\n",
       //      v.x(), v.y(), vr.x(), vr.y(), v.x(), v.y(), vu.x(), vu.y());
       //      lines << QLine(v, vr) << QLine(v, vu);
@@ -294,15 +310,8 @@ void MapRenderer::renderGrid(QPainter &p, QRect area,
     }
   }
 
-
-  p.save();
   //  p.setOpacity(0.7);
-  p.setCompositionMode(QPainter::CompositionMode_SourceOver);
-  p.setRenderHint(QPainter::Antialiasing, true);
-
-
   p.drawLines(lines);
-  p.restore();
 }
 
 void MapRenderer::rulerInterval(qreal length, qreal &interval, int &tlog)

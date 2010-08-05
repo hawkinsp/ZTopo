@@ -54,6 +54,7 @@ int main(int argc, char **argv)
   QString rootDataName(":/config/root.json");
 
 #if defined(Q_WS_MAC)
+  QApplication::instance()->setAttribute(Qt::AA_DontShowIconsInMenus);
   // Mac OS specific code to find resources within a bundle
   CFURLRef appUrlRef = CFBundleCopyBundleURL(CFBundleGetMainBundle());
   CFStringRef macPath = CFURLCopyFileSystemPath(appUrlRef,

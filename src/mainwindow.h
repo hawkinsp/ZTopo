@@ -84,6 +84,11 @@ class PrintJob : public QObject {
 
 extern QString settingMemCache, settingDiskCache, settingDpi;
 
+enum ViewKind {
+  MapKind = 0,
+  PrintKind = 1
+};
+
 class MainWindow : public QMainWindow
 {
   Q_OBJECT
@@ -127,6 +132,7 @@ private slots:
 
   void searchEntered();
 
+  void setSearchResultsVisible(bool);
   void searchResultsReceived();
   void searchResultActivated(const QModelIndex &);
 
@@ -215,11 +221,12 @@ private:
 
   bool usingGL;
 
-  void setSearchResultsVisible(bool);
-
   // Notifications from peer windows
   void windowListChanged();
   void glPreferenceChanged(bool useGL);
+
+  ViewKind currentView();
+  void setCurrentView(ViewKind);
 };
 
 

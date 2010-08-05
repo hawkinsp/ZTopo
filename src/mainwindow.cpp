@@ -54,6 +54,7 @@
 #include "printview.h"
 #include "coordformatter.h"
 #include "consts.h"
+#include "searchhandler.h"
 
 #include <iostream>
 
@@ -232,6 +233,7 @@ void MainWindow::createWidgets()
   searchArea->setLayout(searchVBox);
 
   searchResults = new QStandardItemModel;
+
   resultList = new QTreeView(searchDock);
   resultList->setAlternatingRowColors(true);
   resultList->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -288,6 +290,7 @@ void MainWindow::createActions()
 
   // Regular vs print view
   viewActionGroup = new QActionGroup(this);
+  viewActionGroup->setExclusive(true);
   mapViewAction = new QAction(tr("Map View"), this);
   mapViewAction->setCheckable(true);
   mapViewAction->setData(0);
@@ -409,16 +412,26 @@ void MainWindow::createActions()
 
   windowActions = NULL;
 
-  showSearchResults = new QAction(tr("Search Results"), this);
+  showSearchResults = new QAction(QIcon(":/images/edit-find.png"), 
+                                  tr("Show Search Results"), this);
   showSearchResults->setCheckable(true);
   showSearchResults->setChecked(false);
   connect(showSearchResults, SIGNAL(toggled(bool)),
-          searchDock, SLOT(setVisible(bool)));
+          this, SLOT(setSearchResultsVisible(bool)));
 }
 
 void MainWindow::setToolbarVisible(bool vis)
 {
+#ifdef Q_WS_MAC
+  // Work around artifacts that appear when hiding Mac unified toolbar.
+  hide();
   toolBar->setVisible(vis);
+  setSearchResultsVisible(false);
+  show();
+#else
+  toolBar->setVisible(vis);
+#endif
+
 }
 
 void MainWindow::createMenus()
@@ -471,6 +484,7 @@ void MainWindow::createMenus()
   viewMenu->addSeparator();
   viewMenu->addAction(showToolBarAction);
   viewMenu->addAction(showStatusBarAction);
+  viewMenu->addAction(showSearchResults);
 
   viewMenu->addSeparator();
   QMenu *layerMenu = viewMenu->addMenu(tr("Map &Layer"));
@@ -530,23 +544,48 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::setSearchResultsVisible(bool vis)
 {
-  searchDock->setVisible(vis);
+  QList<QString> labels;
+  labels << tr("Name");
+  labels << tr("Type");
+  labels << tr("County");
+  labels << tr("Map Name");
+  searchResults->setHorizontalHeaderLabels(labels);
+  for (int i = 0; i < labels.size(); i++) {
+    resultList->resizeColumnToContents(i);
+  }
   showSearchResults->setChecked(vis);
+  view->setSearchResultsVisible(vis);
+  if (vis) setCurrentView(MapKind);
+  searchDock->setVisible(vis);
 }
 
 void MainWindow::viewChanged(QAction *a)
 {
-  switch (a->data().toInt()) {
-  case 0: //
-    centralWidgetStack->setCurrentIndex(0);
+  setCurrentView(ViewKind(a->data().toInt()));
+}
+
+ViewKind MainWindow::currentView()
+{
+  return ViewKind(centralWidgetStack->currentIndex());
+}
+
+void MainWindow::setCurrentView(ViewKind kind)
+{
+
+  switch (kind) {
+  case MapKind: //
+    centralWidgetStack->setCurrentIndex(MapKind);
+    mapViewAction->setChecked(true);
     break;
-  case 1:
+  case PrintKind:
     printScene->setPageMetrics(printer);
     printScene->setMapScale(view->currentMapScale());
     printScene->setMapLayer(view->currentLayer());
     printScene->centerMapOn(view->center());
     printView->fitToView();
-    centralWidgetStack->setCurrentIndex(1);
+    centralWidgetStack->setCurrentIndex(PrintKind);
+    printViewAction->setChecked(true);
+    setSearchResultsVisible(false);
     break;
   default: qFatal("Unknown view ID in viewChanged");
   }
@@ -659,12 +698,18 @@ void MainWindow::showRulerTriggered(bool v)
 static const qreal zoomIncrement = 1.333;
 void MainWindow::zoomInTriggered()
 {
-  view->setScale(view->currentScale() * zoomIncrement);
+  switch (currentView()) {
+  case MapKind: view->zoomIn(); break;
+  case PrintKind: printView->scale(zoomIncrement, zoomIncrement); break;
+  }
 }
 
 void MainWindow::zoomOutTriggered()
 {
-  view->setScale(view->currentScale() / zoomIncrement);
+  switch (currentView()) {
+  case MapKind: view->zoomOut(); break;
+  case PrintKind: printView->scale(1.0/zoomIncrement, 1.0/zoomIncrement); break;
+  }
 }
 
 
@@ -703,6 +748,8 @@ void MainWindow::searchEntered()
   QString query = searchLine->text();
 
   searchResults->clear();
+  view->setSearchResultsVisible(false);
+  view->setSearchResults(QList<QPoint>());
   if (query.isEmpty()) {
     searchCaption->setText(defaultSearchCaption);
     return;
@@ -714,7 +761,19 @@ void MainWindow::searchEntered()
       QPointF p = map->projection()->transformFrom(pjGeo, gp);
       QPoint mp = map->projToMap().map(p).toPoint();
       view->centerOn(mp);
-      setSearchResultsVisible(false);
+
+      QList<QStandardItem *> items;
+      QStandardItem *name = new QStandardItem(searchLine->text());
+      name->setData(gp, Qt::UserRole + 1);
+      items << name;
+      items << new QStandardItem("Coordinate");
+      searchResults->appendRow(items);
+
+      QList<QPoint> mapPoints;
+      mapPoints << mp;
+      view->setSearchResults(mapPoints);
+      setSearchResultsVisible(true);
+
       searchCaption->setText(tr("Matching coordinate found"));
       lastCursorPos = mp;
       return;
@@ -738,188 +797,6 @@ void MainWindow::searchEntered()
 
   searchCaption->setText(tr("Searching..."));
 }
-
-
-struct SearchResult {
-  QString featureName;
-  QPointF location;
-  QString countyName;
-  QString cellName;
-  QString featureType;
-  int elevation;
-  
-  void clear();
-};
-
-void SearchResult::clear()
-{
-  featureName.clear();
-  location = QPointF(0.0, 0.0);
-  countyName.clear();
-  cellName.clear();
-  featureType.clear();
-  elevation = 0;
-}
-
-enum SearchElement {
-  USGS,
-  FeatureName,
-  Latitude,
-  Longitude,
-  CountyName,
-  CellName,
-  FeatureType,
-  Elevation,
-  IgnoredElement
-};
-
-QHash<QString, SearchElement> searchElements;
-bool initSearchElements() {
-  searchElements.insert("USGS", USGS);
-  searchElements.insert("FEATURE_NAME", FeatureName);
-  searchElements.insert("FEAT_LATITUDE_NMBR", Latitude);
-  searchElements.insert("FEAT_LONGITUDE_NMBR", Longitude);
-  searchElements.insert("CNTY_NAME", CountyName);
-  searchElements.insert("CELL_NAME", CellName);
-  searchElements.insert("FEATURE_TYPE", FeatureType);
-  searchElements.insert("ELEVATION", Elevation);
-
-  searchElements.insert("USGSLIST", IgnoredElement);
-  searchElements.insert("FEATURE_ID_NMBR", IgnoredElement);
-  searchElements.insert("STATE_EQUIVALENT_NAME", IgnoredElement);
-  searchElements.insert("FEAT_LATITUDE_CHAR", IgnoredElement);
-  searchElements.insert("FEAT_LONGITUDE_CHAR", IgnoredElement);
-  return true;
-}
-static bool searchElementsInitialized = initSearchElements();
-
-class SearchHandler : public QXmlDefaultHandler
-{
-public:
-  SearchHandler();
-
-  virtual bool startElement(const QString & namespaceURI, const QString & localName,
-                            const QString & qName, const QXmlAttributes & atts);
-  virtual bool characters(const QString & ch);
-  virtual bool endElement(const QString & namespaceURI, const QString & localName, 
-                          const QString & qName) ;
-  virtual bool fatalError(const QXmlParseException & exception);
-
-  bool hasErrors() const { return errors; }
-  const QList<SearchResult> &results() const { return fResults; }
-
-private:
-  SearchResult currentResult;
-  SearchElement currentElem;
-  QString elemData;
-  QList<SearchResult> fResults;
-  bool errors;
-};
-
-SearchHandler::SearchHandler()
-  : QXmlDefaultHandler()
-{
-  currentElem = IgnoredElement;
-  errors = false;
-}
-
-bool SearchHandler::startElement(const QString &, const QString &, 
-                                 const QString &name, const QXmlAttributes &)
-{
-  assert(searchElementsInitialized);
-
-  if (!searchElements.contains(name)) {
-    qDebug() << "Unknown XML tag in search response " << name;
-    return true;
-  }
-
-  currentElem = searchElements.value(name);
-  elemData.clear();
-
-  if (currentElem == USGS) {
-    currentResult.clear();
-  }
-  
-  return true;
-}
-
-bool SearchHandler::characters(const QString &ch)
-{
-  elemData.append(ch);
-  return true;
-}
-
-bool SearchHandler::endElement(const QString &, const QString &, const QString &name)
-{
-  if (!searchElements.contains(name)) {
-    qDebug() << "Unknown XML tag in search response " << name;
-    return true;
-  }
-  SearchElement elem = searchElements.value(name);
-
-  switch (elem) {
-  case FeatureName:
-    currentResult.featureName = elemData;
-    break;
-  case Latitude: {
-    bool ok;
-    qreal lat = elemData.toDouble(&ok);
-    if (ok) {
-      currentResult.location.setY(lat);
-    } else {
-      qWarning() << "Could not parse latitude " << elemData;
-    }
-    break;
-  }
-  case Longitude: {
-    bool ok;
-    qreal lon = elemData.toDouble(&ok);
-    if (ok) {
-      currentResult.location.setX(lon);
-    } else {
-      qWarning() << "Could not parse longitude " << elemData;
-    }
-    break;
-  }
-  case CountyName:
-    currentResult.countyName = elemData;
-    break;
-  case CellName:
-    currentResult.cellName = elemData;
-    break;
-  case FeatureType:
-    currentResult.featureType = elemData;
-    break;
-  case Elevation: {
-    bool ok;
-    int elevation = elemData.toInt(&ok);
-    if (ok) {
-      currentResult.elevation = elevation;
-    } else {
-      qWarning() << "Could not parse elevation  " << elemData;
-    }
-    break;
-  }
-
-  case USGS:
-    fResults.append(currentResult);
-    break;
-
-  case IgnoredElement:
-    break;
-  }
-  return true;
-}
-
-bool SearchHandler::fatalError (const QXmlParseException & exception)
- {
-     qWarning() << "Fatal error on line" << exception.lineNumber()
-                << ", column" << exception.columnNumber() << ":"
-                << exception.message();
-
-     return false;
- }
-
 
 
 void MainWindow::searchResultsReceived()
@@ -947,7 +824,8 @@ void MainWindow::searchResultsReceived()
   pendingSearch = NULL;
 
   if (handler.hasErrors()) {
-    statusBar()->showMessage(tr("Error reading search results"), statusMessageTimeout);
+    statusBar()->showMessage(tr("Error reading search results"), 
+                             statusMessageTimeout);
     setSearchResultsVisible(false);
     return;
   }
@@ -955,36 +833,31 @@ void MainWindow::searchResultsReceived()
   const QList<SearchResult> &results = handler.results();
   searchCaption->setText(tr("%1 results found").arg(results.size()));
 
-  if (results.size() == 1) {
-    setSearchResultsVisible(false);
-    Projection *pjGeo = Geographic::getProjection(NAD83);
-    QPointF pProj = map->projection()->transformFrom(pjGeo, results[0].location);
-    QPoint pMap = map->projToMap().map(pProj).toPoint();
-    view->centerOn(pMap);
-  } else if (results.size() > 1) {
-    resultList->setSortingEnabled(false);
-    QList<QString> labels;
-    labels << tr("Name");
-    labels << tr("Type");
-    labels << tr("County");
-    labels << tr("Map Name");
-    searchResults->setHorizontalHeaderLabels(labels);
-    foreach (const SearchResult &r, results) {
-      QList<QStandardItem *> items;
-      QStandardItem *name = new QStandardItem(r.featureName);
-      name->setData(r.location, Qt::UserRole + 1);
-      items << name;
-      items << new QStandardItem(r.featureType);
-      items << new QStandardItem(r.countyName);
-      items << new QStandardItem(r.cellName);
-      searchResults->appendRow(items);
-    }
-    for (int i = 0; i < labels.size(); i++) {
-      resultList->resizeColumnToContents(i);
-    }
-    resultList->setSortingEnabled(true);
-    setSearchResultsVisible(true);
+  QList<QPoint> resultPoints;
+  Projection *pjGeo = Geographic::getProjection(NAD83);
+
+  resultList->setSortingEnabled(false);
+  foreach (const SearchResult &r, results) {
+    QList<QStandardItem *> items;
+    QStandardItem *name = new QStandardItem(r.featureName);
+    name->setData(r.location, Qt::UserRole + 1);
+    items << name;
+    items << new QStandardItem(r.featureType);
+    items << new QStandardItem(r.countyName);
+    items << new QStandardItem(r.cellName);
+    searchResults->appendRow(items);
+
+    QPointF pProj = map->projection()->transformFrom(pjGeo, r.location);
+    resultPoints << map->projToMap().map(pProj).toPoint();
   }
+  resultList->setSortingEnabled(true);
+  view->setSearchResults(resultPoints);
+  setSearchResultsVisible(true);
+
+  if (resultPoints.size() == 1) {
+    view->centerOn(resultPoints[0]);
+  } 
+
 }
 
 void MainWindow::searchResultActivated(const QModelIndex &i)
