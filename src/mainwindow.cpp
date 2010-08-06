@@ -93,17 +93,24 @@ MainWindow::MainWindow(Map *m, MapRenderer *r, Cache::Cache &c,
   coordFormats << new DecimalDegreeFormatter();
   
   grids << Grid(false, false, 1.0,   tr("No Grid"));
-  grids << Grid(true, true, 100,     tr("UTM 100m"));
+  grids << Grid(true, true, 500,     tr("UTM 500m"));
   grids << Grid(true, true, 1000,    tr("UTM 1000m"));
+  grids << Grid(true, true, 5000,     tr("UTM 5000m"));
   grids << Grid(true, true, 10000,   tr("UTM 10000m"));
   grids << Grid(true, true, 100000,  tr("UTM 100000m"));
-  //  grids << Grid(true, true, 1000000, tr("UTM 1000000m"));
   grids << Grid(true, false, 0.5/60.0, tr("30\""));
   grids << Grid(true, false, 1.0/60.0, tr("1'"));
   grids << Grid(true, false, 0.125, tr("7.5'"));
   grids << Grid(true, false, 0.25, tr("15'"));
   grids << Grid(true, false, 0.5, tr("30'"));
   grids << Grid(true, false, 0.5, trUtf8("1\xc2\xb0"));
+
+  suggestedMapScales << 24000;
+  suggestedMapScales << 50000;
+  suggestedMapScales << 100000;
+  suggestedMapScales << 200000;
+  suggestedMapScales << 500000;
+  suggestedMapScales << 1000000;
 
   createWidgets();
   createActions();
@@ -396,6 +403,15 @@ void MainWindow::createActions()
           this, SLOT(zoomOutTriggered()));
   zoomOutAction->setShortcuts(QKeySequence::ZoomOut);
 
+  zoomToScaleActionGroup = new QActionGroup(this);
+  foreach (int s, suggestedMapScales) {
+    QAction *a = new QAction("1:" % QString::number(s), this);
+    a->setData(s);
+    zoomToScaleActionGroup->addAction(a);
+  }
+  connect(zoomToScaleActionGroup, SIGNAL(triggered(QAction *)),
+          this, SLOT(zoomToScaleTriggered(QAction *)));
+
 
   minimizeAction = new QAction(tr("&Minimize"), this);
   connect(minimizeAction, SIGNAL(triggered()),
@@ -506,8 +522,6 @@ void MainWindow::createMenus()
     datumMenu->addAction(datumActions.at(i));
   }
 
-  viewMenu->addSeparator();
-
   QMenu *gridMenu = viewMenu->addMenu(tr("&Grid"));
   QList<QAction *> gridActions = gridActionGroup->actions();
   for (int i = 0; i < gridActions.size(); i++) {
@@ -519,6 +533,11 @@ void MainWindow::createMenus()
   viewMenu->addSeparator();
   viewMenu->addAction(zoomInAction);
   viewMenu->addAction(zoomOutAction);
+  QMenu *zoomMenu = viewMenu->addMenu(tr("&Zoom To Scale"));
+  QList<QAction *> zoomActions = zoomToScaleActionGroup->actions();
+  foreach (QAction *a, zoomActions) {
+    zoomMenu->addAction(a);
+  }
 
 
   windowMenu = menuBar()->addMenu(tr("&Window"));  
@@ -708,6 +727,15 @@ void MainWindow::zoomOutTriggered()
   switch (currentView()) {
   case MapKind: view->zoomOut(); break;
   case PrintKind: printView->scale(1.0/zoomIncrement, 1.0/zoomIncrement); break;
+  }
+}
+
+void MainWindow::zoomToScaleTriggered(QAction *a)
+{
+  int mapScale = a->data().toInt();
+  switch (currentView()) {
+  case MapKind: view->setMapScale(mapScale); break;
+  case PrintKind: printScene->setMapScale(mapScale); break;
   }
 }
 

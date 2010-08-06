@@ -30,7 +30,12 @@ public:
   QRegExp &getRegExp() { return re; }
   QString &name() { return sName; }
 
+  // Format a geographic point 
   virtual QString format(Datum, QPointF) = 0;
+
+  // Format X and Y coordinates, e.g. UTM Y coordinate 1234 becomes 1234mN 
+  virtual QString formatX(qreal) = 0;
+  virtual QString formatY(qreal) = 0;
 
   // Given a datum d and "current" point c, parse a string into a geographic
   // coordinate
@@ -44,6 +49,9 @@ class DecimalDegreeFormatter : public CoordFormatter {
 public:
   DecimalDegreeFormatter();
   virtual QString format(Datum, QPointF);
+  virtual QString formatX(qreal);
+  virtual QString formatY(qreal);
+
   virtual bool parse(Datum, QPointF, const QString &, QPointF &);
 };
 
@@ -51,6 +59,9 @@ class DMSFormatter : public CoordFormatter {
 public:
   DMSFormatter();
   virtual QString format(Datum, QPointF);
+  virtual QString formatX(qreal);
+  virtual QString formatY(qreal);
+
   virtual bool parse(Datum, QPointF, const QString &, QPointF &);
 };
 
@@ -58,6 +69,9 @@ class UTMFormatter : public CoordFormatter {
 public:
   UTMFormatter();
   virtual QString format(Datum, QPointF);
+  virtual QString formatX(qreal);
+  virtual QString formatY(qreal);
+
   virtual bool parse(Datum, QPointF, const QString &, QPointF &);
 };
 

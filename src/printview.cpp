@@ -106,7 +106,6 @@ void PrintView::pinchGestureEvent(QPinchGesture *g)
   switch (g->state()) {
   case Qt::GestureStarted:
     scaleStep = g->scaleFactor();
-    smoothScaling = false;
     setRenderHints(QPainter::Antialiasing);
     break;
 

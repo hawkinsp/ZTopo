@@ -116,6 +116,7 @@ private slots:
 
   void zoomInTriggered();
   void zoomOutTriggered();
+  void zoomToScaleTriggered(QAction *);
 
   void preferencesTriggered();
   void newWindowTriggered();
@@ -157,7 +158,10 @@ private:
   QActionGroup *windowActions;
 
   // Possible grids to display
-  QVector<Grid> grids;
+  QList<Grid> grids;
+
+  // Suggested scales
+  QList<int> suggestedMapScales;
 
   // Dots per inch of the current screen; 0 = use value reported by Qt
   int screenDpi;
@@ -203,6 +207,7 @@ private:
   QAction *showToolBarAction, *showStatusBarAction;
   
   QAction *zoomInAction, *zoomOutAction;
+  QActionGroup *zoomToScaleActionGroup;
 
   QAction *preferencesAction;
   QAction *minimizeAction;

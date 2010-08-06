@@ -30,6 +30,7 @@ public:
   void showGrid(Datum d, bool utm, qreal interval);
   void hideGrid();
 
+  // Have all of the tiles required for the scene loaded?
   bool tilesFinishedLoading();
 
 private slots:

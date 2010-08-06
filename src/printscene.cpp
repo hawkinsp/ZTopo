@@ -25,6 +25,7 @@
 #include <QPrinter>
 #include <QStyleOptionGraphicsItem>
 #include "consts.h"
+#include "coordformatter.h"
 #include "printscene.h"
 #include "map.h"
 #include "maprenderer.h"
@@ -73,6 +74,11 @@ private:
   Map *map;
   MapRenderer *renderer;
   QRectF itemRect;
+  QRectF borderRect;
+  QRectF mapRect;
+  qreal borderWidth;
+  qreal gridMarginWidth;
+
 
   int mapLayer, mapScale;
   QPoint mapCenter;
@@ -85,6 +91,7 @@ private:
   Datum gridDatum;
   bool gridUTM;
   qreal gridInterval;
+  CoordFormatter *gridFormatter;
 
   void computeGeometry();
 
@@ -94,10 +101,11 @@ private:
 
 
 MapItem::MapItem(Map *m, MapRenderer *r, QGraphicsItem *parent)
-  : QGraphicsItem(parent), map(m), renderer(r)
+  : QGraphicsItem(parent), map(m), renderer(r), gridFormatter(NULL)
 {
   setAcceptedMouseButtons(Qt::LeftButton);
   setCursor(Qt::OpenHandCursor);
+  setFlag(QGraphicsItem::ItemUsesExtendedStyleOption, true);
 
   renderer->addClient(this);
   mapLayer = 0;
@@ -131,9 +139,17 @@ QRectF MapItem::boundingRect() const
 
 void MapItem::computeGeometry()
 {
+  gridMarginWidth = gridEnabled ? 20.0 / pointsPerInch * dpiX : 0;
+  borderWidth = 0.4 / pointsPerInch * dpiX;
+
+  qreal bg = gridMarginWidth + borderWidth / 2;
+  borderRect = itemRect.adjusted(bg, bg, -bg, -bg);
+  mapRect = borderRect.adjusted(borderWidth / 2, borderWidth / 2,
+                                     -borderWidth / 2, -borderWidth / 2);
+
   // Size of the page in meters
-  QSizeF pagePhysicalArea(qreal(itemRect.width()) / dpiX * metersPerInch, 
-                 qreal(itemRect.height()) / dpiY * metersPerInch);
+  QSizeF pagePhysicalArea(qreal(mapRect.width()) / dpiX * metersPerInch, 
+                 qreal(mapRect.height()) / dpiY * metersPerInch);
 
   // Size of the map area in meters
   QSizeF mapPhysicalArea = pagePhysicalArea * mapScale;
@@ -149,8 +165,8 @@ void MapItem::computeGeometry()
                                               mapPixelArea.height() / 2);
   mapPixelRect = QRect(mapPixelTopLeft, mapPixelArea);
 
-  scaleX = qreal(itemRect.width()) / mapPixelArea.width();
-  scaleY = qreal(itemRect.height()) / mapPixelArea.height();
+  scaleX = qreal(mapRect.width()) / mapPixelArea.width();
+  scaleY = qreal(mapRect.height()) / mapPixelArea.height();
   scale = std::max(scaleX, scaleY);
 
   /*  qDebug("Print mapScale %d; scale %f", mapScale, scale);
@@ -184,35 +200,146 @@ void MapItem::paint(QPainter *painter, const QStyleOptionGraphicsItem * option,
   painter->setBackground(Qt::white);
   painter->eraseRect(itemRect);
 
-  qreal borderWidth = 0.4 / pointsPerInch * dpiX;
-  QRectF borderRect = itemRect.adjusted(borderWidth / 2, borderWidth / 2, 
-                                        -borderWidth / 2, -borderWidth / 2);
+
   QPen borderPen(Qt::black);
   borderPen.setWidthF(borderWidth);
   painter->setPen(borderPen);
   painter->drawRect(borderRect);
 
 
-  QRectF mapRect = itemRect.adjusted(borderWidth, borderWidth,
-                                     -borderWidth, -borderWidth);
-  painter->setClipRect(mapRect);
 
+  // Portion of mapPixelRect that is exposed
+  QRectF exposedMapRect = option->exposedRect.intersected(mapRect);
+
+  qreal exposedLeft = (exposedMapRect.left() - mapRect.left()) / mapRect.width() 
+    * mapPixelRect.width() + mapPixelRect.left();
+  qreal exposedTop = (exposedMapRect.top() - mapRect.top()) / mapRect.height() 
+    * mapPixelRect.height() + mapPixelRect.top();
+  qreal exposedWidth = exposedMapRect.width() / mapRect.width() 
+    * mapPixelRect.width();
+  qreal exposedHeight = exposedMapRect.height() / mapRect.height() 
+    * mapPixelRect.height();
+  QRectF exposedMapArea(exposedLeft, exposedTop, exposedWidth, exposedHeight);
+
+  //  qDebug() << mapPixelRect << exposedMapArea;
+
+  qreal bumpedScaleDetail;
+  int bumpedTileSize;
+  renderer->bumpScale(mapLayer, scale * detail, bumpedScaleDetail, bumpedTileSize);
+  qreal bumpedDetail = bumpedScaleDetail / scale;
+  qreal bumpedScale = scale;
   painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
-  painter->scale(scaleX / scale / detail, scaleY / scale / detail);
+  painter->setRenderHint(QPainter::TextAntialiasing, true);
+
   painter->save();
-  //  painter->scale(1.0 / detail, 1.0 / detail);
-  renderer->render(*painter, mapLayer, mapPixelRect, scale * detail);
+  painter->setClipRect(mapRect);
+  painter->translate(exposedMapRect.topLeft());
+  painter->scale(1.0 / bumpedDetail, 1.0 / bumpedDetail);
+  renderer->render(*painter, mapLayer, exposedMapArea.toAlignedRect(), 
+                   bumpedScaleDetail);
   painter->restore();
+
 
   if (gridEnabled) {
     QPen pen(Qt::blue);
     pen.setWidthF(borderWidth * detail);
+
+
+
+    painter->save();
+    painter->setClipRect(mapRect);
+    painter->translate(mapRect.topLeft());
+    painter->scale(1.0 / bumpedDetail, 1.0 / bumpedDetail);
     painter->setPen(pen);
+    QList<GridTick> ticks;
     if (gridUTM) {
-      renderer->renderUTMGrid(*painter, mapPixelRect, scale * detail, gridDatum, gridInterval);
+      renderer->renderUTMGrid(*painter, mapPixelRect, bumpedScaleDetail, gridDatum,
+                              gridInterval, &ticks);
     } else {
-      renderer->renderGeographicGrid(*painter, mapPixelRect, scale * detail, gridDatum, 
-                                     gridInterval);
+      renderer->renderGeographicGrid(*painter, mapPixelRect, bumpedScaleDetail, 
+                                     gridDatum, gridInterval, &ticks);
+    }
+    painter->restore();
+    painter->translate(mapRect.topLeft());
+
+    pen.setColor(Qt::black);
+    pen.setWidthF(borderWidth);
+    painter->setPen(pen);
+    QFont font;
+    font.setPixelSize(9.0 / pointsPerInch * dpiX);
+    painter->setFont(font);
+    QFontMetrics fm(painter->fontMetrics());
+    qreal tickLen = 5.0 / pointsPerInch * dpiX;
+    foreach (const GridTick &tick, ticks) {
+      switch (tick.side) {
+      case Left: {
+        qreal y = (tick.mapPos - mapPixelRect.top()) * bumpedScale;
+        QPointF p1(-borderWidth, y);
+        QPointF p2(-tickLen - borderWidth, y);
+        painter->drawLine(p1, p2);
+
+        painter->save();
+        painter->translate(-tickLen - borderWidth - fm.height() / 2.0, y);
+        painter->rotate(-90.0);
+        QString s = gridFormatter->formatY(tick.gridPos);
+        qreal w = fm.width(s);
+        QRectF tr(-w / 2.0, -fm.height() / 2.0, w, fm.height());
+        painter->drawText(tr, 0, s);
+        painter->restore();
+        break;
+      }
+      case Top: {
+        qreal x = (tick.mapPos - mapPixelRect.left()) * bumpedScale;
+        QPointF p1(x, -borderWidth);
+        QPointF p2(x, -tickLen - borderWidth);
+        painter->drawLine(p1, p2);
+
+        painter->save();
+        painter->translate(x, -tickLen - borderWidth - fm.height() / 2.0);
+        QString s = gridFormatter->formatX(tick.gridPos);
+        qreal w = fm.width(s);
+        QRectF tr(-w / 2.0, -fm.height() / 2.0, w, fm.height());
+        painter->drawText(tr, 0, s);
+        painter->restore();
+
+        break;
+      }
+      case Right: {
+        qreal y = (tick.mapPos - mapPixelRect.top()) * bumpedScale;
+        QPointF p1(mapRect.width() + borderWidth, y);
+        QPointF p2(mapRect.width() + tickLen + borderWidth, y);
+        painter->drawLine(p1, p2);
+
+        painter->save();
+        painter->translate(mapRect.width() + tickLen + borderWidth  + 
+                           fm.height() / 2.0, y);
+        painter->rotate(90.0);
+        QString s = gridFormatter->formatY(tick.gridPos);
+        qreal w = fm.width(s);
+        QRectF tr(-w / 2.0, -fm.height() / 2.0, w, fm.height());
+        painter->drawText(tr, 0, s);
+        painter->restore();
+
+        break;
+      }
+      case Bottom: {
+        qreal x = (tick.mapPos - mapPixelRect.left()) * bumpedScale;
+        QPointF p1(x, mapRect.height() + borderWidth);
+        QPointF p2(x, mapRect.height() + tickLen + borderWidth);
+        painter->drawLine(p1, p2);
+
+
+        painter->save();
+        painter->translate(x, mapRect.height() + tickLen + borderWidth);
+        QString s = gridFormatter->formatX(tick.gridPos);
+        qreal w = fm.width(s);
+        QRectF tr(-w / 2.0, 0.0, w, fm.height());
+        painter->drawText(tr, 0, s);
+        painter->restore();
+
+        break;
+      }
+      }
     }
   }
 }
@@ -231,13 +358,20 @@ void MapItem::showGrid(Datum d, bool utm, qreal interval)
   gridDatum = d;
   gridUTM = utm;
   gridInterval = interval;
-  update();
+  if (gridFormatter) delete gridFormatter;
+  if (utm) {
+    gridFormatter = new UTMFormatter();
+  } else {
+    gridFormatter = new DMSFormatter();
+  }
+  computeGeometry();
 }
 
 void MapItem::hideGrid()
 {
   gridEnabled = false;
-  update();
+  if (gridFormatter) { delete gridFormatter; gridFormatter = NULL; }
+  computeGeometry();
 }
 
 void MapItem::mouseMoveEvent(QGraphicsSceneMouseEvent *ev)
@@ -246,7 +380,6 @@ void MapItem::mouseMoveEvent(QGraphicsSceneMouseEvent *ev)
     QPointF before = itemToMap(ev->lastPos());
     QPointF after = itemToMap(ev->pos());
     QPointF delta = after - before;
-    qDebug() << ev->pos() << "delta" << delta;
     centerOn((mapPixelRect.center() - delta).toPoint());
   }
 }
@@ -285,8 +418,6 @@ PrintScene::PrintScene(Map *m, MapRenderer *r, const QPrinter &printer)
 
 void PrintScene::setPageMetrics(const QPrinter &printer)
 {
-  qDebug() << "page" << printer.pageRect();
-  qDebug() << "paper" << printer.paperRect();
   QRectF pageRect(printer.pageRect());
   paperRectItem->setRect(printer.paperRect());
   pageRectItem->setPos(pageRect.topLeft());

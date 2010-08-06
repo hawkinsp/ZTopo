@@ -34,6 +34,22 @@ class MapRenderer;
 class QPainterPath;
 class QNetworkAccessManager;
 
+enum Direction {
+  Left = 0,
+  Top = 1,
+  Right = 2,
+  Bottom = 3
+};
+
+struct GridTick
+{
+  GridTick(Direction, qreal, qreal);
+
+  Direction side;
+  qreal mapPos;
+  qreal gridPos;
+};
+
 class MapRendererClient {
  public:
   virtual int currentLayer() const = 0;
@@ -67,9 +83,9 @@ public:
   void renderRuler(QPainter &p, int width, qreal scale);
 
   void renderGeographicGrid(QPainter &p, QRect area, qreal scale, Datum d,
-                            qreal interval);
+                            qreal interval, QList<GridTick> *);
   void renderUTMGrid(QPainter &p, QRect area, qreal scale, Datum d,
-                     qreal interval);
+                     qreal interval, QList<GridTick> *);
 
   Cache::Cache &getCache() { return tileCache; }
 
@@ -101,8 +117,8 @@ private:
   void rulerInterval(qreal length, qreal &interval, int &ilog);
 
   // Render a grid on a projection
-  void renderGrid(QPainter &p, QRect area, Projection *pj, 
-                  qreal interval);
+  void renderGrid(QPainter &p, QPainterPath *clipPath, QRect area, Projection *pj, 
+                  qreal interval, QList<GridTick> *ticks);
 };
 
 #endif

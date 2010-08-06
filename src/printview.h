@@ -28,9 +28,6 @@ private:
 
   qreal minScale, fitToViewScale, maxScale;
 
-  bool smoothScaling;
-
-  QPointF gestureViewCenter;
 
 private slots:
   void calculateScales();

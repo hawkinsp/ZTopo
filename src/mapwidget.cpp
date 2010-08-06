@@ -239,7 +239,12 @@ int MapWidget::currentLayer() const
 qreal MapWidget::currentMapScale() const
 {
   return (map->mapPixelSize().width() * dpi / metersPerInch)
-    / currentScale();
+    / (scaleFactor * scaleStep);
+}
+
+void MapWidget::setMapScale(qreal mapScale)
+{
+  setScale((map->mapPixelSize().width() * dpi / metersPerInch) / mapScale);
 }
 
 void MapWidget::tilesChanged()
@@ -266,11 +271,13 @@ void MapWidget::paintEvent(QPaintEvent *ev)
     pen.setWidth(0);
     p.setPen(pen);
     if (gridUTM) {
-      renderer->renderUTMGrid(p, mr, currentScale(), gridDatum, gridInterval);
+      renderer->renderUTMGrid(p, mr, currentScale(), gridDatum, gridInterval, NULL);
     } else {
       renderer->renderGeographicGrid(p, mr, currentScale(), gridDatum, 
-                                     gridInterval);
+                                     gridInterval, NULL);
     }
+
+    //    qDebug() << gridDatum << map->datum();
   }
 
   // Draw search results

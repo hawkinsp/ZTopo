@@ -57,11 +57,18 @@ bool DecimalDegreeFormatter::parse(Datum, QPointF, const QString &s, QPointF &p)
 
 QString DecimalDegreeFormatter::format(Datum, QPointF g)
 {
-  QString s = 
-    QString::number(fabs(g.y()), 'f', 5) % degree % (g.y() >= 0 ? 'N' : 'S')
-    % " " % 
-    QString::number(fabs(g.x()), 'f', 5) % degree % (g.x() >= 0 ? 'E' : 'W');
+  QString s = formatY(g.y()) % " " % formatX(g.x());
   return s;
+}
+
+QString DecimalDegreeFormatter::formatX(qreal x)
+{
+  return QString::number(fabs(x), 'f', 5) % degree % (x >= 0 ? 'E' : 'W');
+}
+
+QString DecimalDegreeFormatter::formatY(qreal y)
+{
+  return QString::number(fabs(y), 'f', 5) % degree % (y >= 0 ? 'N' : 'S');
 }
 
 DMSFormatter::DMSFormatter()
@@ -102,25 +109,35 @@ bool DMSFormatter::parse(Datum, QPointF, const QString &s, QPointF &p)
 }
 
 QString DMSFormatter::format(Datum, QPointF g)
+{  
+  QString s = formatY(g.y()) % " " % formatX(g.x());
+  return s;
+}
+
+QString DMSFormatter::formatX(qreal gx)
 {
-  qreal x = fabs(g.x()), y = fabs(g.y());
-  int yd = int(y);
-  int ym = int(60.0 * (y - yd));
-  int ys = int(3600.0 * (y - qreal(yd) - ym / 60.0));
-  int xd = int(x);
-  int xm = int(60.0 * (x - xd));
-  int xs = int(3600.0 * (x - qreal(xd) - xm / 60.0));
-  
-  QString s = 
-    QString::number(yd) % degree % 
-    QString::number(ym).rightJustified(2, '0') % '\'' % 
-    QString::number(ys).rightJustified(2, '0') % '"' 
-    % (g.y() >= 0 ? 'N' : 'S') % " " % 
-    QString::number(xd) % degree % 
+  int x = round(fabs(gx * 3600.0));
+  int xd = x / 3600;
+  int xm = (x - xd * 3600) / 60;
+  int xs = x - xd * 3600 - xm * 60;
+
+  return QString::number(xd) % degree % 
     QString::number(xm).rightJustified(2, '0') % '\'' % 
     QString::number(xs).rightJustified(2, '0') % '"' 
-    % (g.x() >=0 ? 'E' : 'W');
-  return s;
+    % (gx >=0 ? 'E' : 'W');
+}
+
+QString DMSFormatter::formatY(qreal gy)
+{
+  int y = round(fabs(gy * 3600.0));
+  int yd = y / 3600;
+  int ym = (y - yd * 3600) / 60;
+  int ys = y - yd * 3600 - ym * 60;
+
+  return QString::number(yd) % degree % 
+    QString::number(ym).rightJustified(2, '0') % '\'' % 
+    QString::number(ys).rightJustified(2, '0') % '"' 
+    % (gy >= 0 ? 'N' : 'S');
 }
 
 UTMFormatter::UTMFormatter()
@@ -163,8 +180,18 @@ QString UTMFormatter::format(Datum d, QPointF g)
   QPointF p = pjUTM->transformFrom(Geographic::getProjection(d), g);
 
   QString s = QString::number(z.zone) % z.band % " " %
-    QString::number(p.x(), 'f', 0) % "mE " %
-    QString::number(p.y(), 'f', 0) % "mN";
+    formatX(p.x()) % " " % formatY(p.y());
 
   return s;
+}
+
+QString UTMFormatter::formatX(qreal x)
+{
+  return QString::number(x, 'f', 0) % "mE";
+
+}
+
+QString UTMFormatter::formatY(qreal y)
+{
+  return QString::number(y, 'f', 0) % "mN";
 }

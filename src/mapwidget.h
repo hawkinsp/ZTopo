@@ -51,6 +51,7 @@ public:
 
   // Return the current physical map scale (e.g. 24000 means 1:24000)
   qreal currentMapScale() const;
+  void setMapScale(qreal scale);
 
   // Show/hide ruler
   void setRulerVisible(bool vis);

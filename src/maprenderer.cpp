@@ -43,6 +43,11 @@ static const int maxGridLines = 100;
 
 static const int pruneTimeout = 1000;
 
+GridTick::GridTick(Direction d, qreal m, qreal g)
+  : side(d), mapPos(m), gridPos(g)
+{
+}
+
 MapRenderer::MapRenderer(Map *m, Cache::Cache &c, QObject *parent)
   : QObject(parent), map(m), tileCache(c)
 {
@@ -209,7 +214,8 @@ QPointF MapRenderer::mapToView(QPoint origin, qreal scale, QPointF p)
 }
 
 void MapRenderer::renderGeographicGrid(QPainter &p, QRect area, qreal scale, 
-                                       Datum d, qreal interval)
+                                       Datum d, qreal interval, 
+                                       QList<GridTick> *ticks)
 {
   Projection *pj = Geographic::getProjection(d);
 
@@ -224,13 +230,13 @@ void MapRenderer::renderGeographicGrid(QPainter &p, QRect area, qreal scale,
   QPen pen = p.pen();
   pen.setWidthF(pen.widthF() / scale);
   p.setPen(pen);
-  renderGrid(p, area, pj, interval);
+  renderGrid(p, NULL, area, pj, interval, ticks);
 
   p.restore();
 }
 
 void MapRenderer::renderUTMGrid(QPainter &p, QRect mRect, qreal scale, 
-                                       Datum d, qreal interval)
+                                Datum d, qreal interval, QList<GridTick> *ticks)
 {
   Projection *pjGeo = Geographic::getProjection(d);
   QRectF pRect = map->mapToProj().mapRect(mRect);
@@ -256,21 +262,20 @@ void MapRenderer::renderUTMGrid(QPainter &p, QRect mRect, qreal scale,
   pen.setWidthF(pen.widthF() / scale);
   p.setPen(pen);
 
-
   for (int zone = minZone; zone <= maxZone; zone++) {
     Projection *pj = UTM::getZoneProjection(d, zone);
 
     p.save();
-    p.setClipPath(*getUTMZoneBoundary(d, zone), Qt::IntersectClip);
-    renderGrid(p, mRect, pj, interval);
+    renderGrid(p, getUTMZoneBoundary(d, zone), mRect, pj, interval, ticks);
     p.restore();
   }
   p.restore();
 
 }
 
-void MapRenderer::renderGrid(QPainter &p, QRect area,
-                             Projection *pjGrid, qreal interval)
+void MapRenderer::renderGrid(QPainter &p, QPainterPath *clipPath, QRect area, 
+                             Projection *pjGrid, qreal interval, 
+                             QList<GridTick> *ticks)
 {
   Projection *pjMap = map->projection();
   QRectF parea = map->mapToProj().mapRect(QRectF(area));
@@ -292,6 +297,17 @@ void MapRenderer::renderGrid(QPainter &p, QRect area,
   //  printf("grid bounds %f %f %f %f\n", gridBounds.left(), gridBounds.top(),
   //       gridBounds.right(), gridBounds.bottom());
 
+  // Sides of the grid area in map space; NB. projection "top" is map "bottom"
+  // and vice versa.
+  QLineF sides[4];
+  sides[Left] = QLineF(parea.topLeft(), parea.bottomLeft());
+  sides[Right] = QLineF(parea.topRight(), parea.bottomRight());
+  sides[Top] = QLineF(parea.bottomLeft(), parea.bottomRight());
+  sides[Bottom] = QLineF(parea.topLeft(), parea.topRight());
+
+  if (clipPath) {
+    p.setClipPath(*clipPath, Qt::IntersectClip);
+  }
 
   for (int x = gridMinX; x <= gridMaxX; x++) {
     for (int y = gridMinY; y <= gridMaxY; y++) {
@@ -306,7 +322,36 @@ void MapRenderer::renderGrid(QPainter &p, QRect area,
       //      printf("adding line %f %f to %f %f and %f %f to %f %f\n",
       //      v.x(), v.y(), vr.x(), vr.y(), v.x(), v.y(), vu.x(), vu.y());
       //      lines << QLine(v, vr) << QLine(v, vu);
-      lines << QLineF(p, pr) << QLineF(p, pu);
+      QLineF h(p, pr), v(p, pu);
+      lines << h << v;
+
+      if (ticks) {
+        QPointF ip;
+        if (h.intersect(sides[Left], &ip) == QLineF::BoundedIntersection) {
+          if (!clipPath || clipPath->contains(ip)) { 
+            QPointF imp = map->projToMap().map(ip);
+            *ticks << GridTick(Left, imp.y(), y * interval);
+          }
+        }
+        if (v.intersect(sides[Top], &ip) == QLineF::BoundedIntersection) {
+          if (!clipPath || clipPath->contains(ip)) { 
+            QPointF imp = map->projToMap().map(ip);
+            *ticks << GridTick(Top, imp.x(), x * interval);
+          }
+        }
+        if (h.intersect(sides[Right], &ip) == QLineF::BoundedIntersection) {
+          if (!clipPath || clipPath->contains(ip)) { 
+            QPointF imp = map->projToMap().map(ip);
+            *ticks << GridTick(Right, imp.y(), y * interval);
+          }
+        }
+        if (v.intersect(sides[Bottom], &ip) == QLineF::BoundedIntersection) {
+          if (!clipPath || clipPath->contains(ip)) { 
+            QPointF imp = map->projToMap().map(ip);
+            *ticks << GridTick(Bottom, imp.x(), x * interval);
+          }
+        }
+      }
     }
   }
 
