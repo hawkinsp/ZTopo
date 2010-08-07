@@ -47,6 +47,7 @@ class MapRenderer;
 class MapWidget;
 class PrintScene;
 class PrintView;
+class RootData;
 
 class CoordFormatter;
 class SearchContentHandler;
@@ -94,8 +95,8 @@ class MainWindow : public QMainWindow
   Q_OBJECT
 
 public:
-  MainWindow(Map *m, MapRenderer *r, Cache::Cache &c, QNetworkAccessManager &mgr, 
-             QWidget *parent = 0);
+  MainWindow(const RootData &d, Map *m, MapRenderer *r, Cache::Cache &c, 
+             QNetworkAccessManager &mgr, QWidget *parent = 0);
   ~MainWindow();
 
   friend class SearchContentHandler;
@@ -139,6 +140,7 @@ private slots:
 
   void cacheIOError(const QString &msg);
 private:
+  const RootData &rootData;
   Map *map;
   MapRenderer *renderer;
   Cache::Cache &tileCache;

@@ -54,6 +54,7 @@
 #include "printview.h"
 #include "coordformatter.h"
 #include "consts.h"
+#include "rootdata.h"
 #include "searchhandler.h"
 
 #include <iostream>
@@ -70,11 +71,10 @@ QString settingUseOpenGL = "useOpenGL";
 
 QVector<MainWindow *> windowList;
 
-MainWindow::MainWindow(Map *m, MapRenderer *r, Cache::Cache &c, 
+MainWindow::MainWindow(const RootData &d, Map *m, MapRenderer *r, Cache::Cache &c, 
                        QNetworkAccessManager &mgr, QWidget *parent)
-  : QMainWindow(parent), map(m), renderer(r), tileCache(c), networkManager(mgr),
-    pendingSearch(NULL),
-    printer(QPrinter::HighResolution)
+  : QMainWindow(parent), rootData(d), map(m), renderer(r), tileCache(c), 
+    networkManager(mgr), pendingSearch(NULL), printer(QPrinter::HighResolution)
 {
   setAttribute(Qt::WA_DeleteOnClose);
   setWindowTitle(tr("Topographic Map Viewer"));
@@ -644,7 +644,7 @@ void MainWindow::gridChanged(QAction *a)
 
 void MainWindow::newWindowTriggered()
 {
-  MainWindow *m = new MainWindow(map, renderer, tileCache, networkManager);
+  MainWindow *m = new MainWindow(rootData, map, renderer, tileCache, networkManager);
   m->show();
 }
 
@@ -813,7 +813,7 @@ void MainWindow::searchEntered()
     pendingSearch = NULL;
   }
 
-  QUrl url("http://geonames.usgs.gov/pls/gnis/x");
+  QUrl url(rootData.gnisUrl());
   url.addQueryItem("fname", "'" % searchLine->text() % "'");
   url.addQueryItem("state", "'california'");
   url.addQueryItem("op", "1");
@@ -900,7 +900,6 @@ void MainWindow::searchResultActivated(const QModelIndex &i)
 void MainWindow::updatePosition(QPoint m)
 {
   lastCursorPos = m;
-
   Datum d = currentDatum();
   QPointF g = Geographic::getProjection(d)->transformFrom(map->projection(), 
                                              map->mapToProj().map(QPointF(m)));

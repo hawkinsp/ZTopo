@@ -1,4 +1,7 @@
 {
+  "currentVersion": { "major": 0, "minor": 2 },
+  "homePageURL": "http://hawkinsp.github.com/ZTopo/",
+  "gnisURL": "http://geonames.usgs.gov/pls/gnis/x",
   "maps": [
     { 
       "id": "topo-ca",

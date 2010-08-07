@@ -16,7 +16,7 @@ include_directories(${QT_QTXML_INCLUDE_DIR})
 include_directories(${GDAL_INCLUDE_DIR})
 include_directories(${BERKELEY_DB_INCLUDE_DIR})
 
-set(proj_lib "/opt/local/lib/libproj.a")
+set(proj_lib "-lproj")
 
 include_directories (/opt/local/include)
 #include_directories (/Users/hawkinsp/opt/gdal-1.7.2/include)

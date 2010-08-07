@@ -244,8 +244,8 @@ int main(int argc, char **argv)
   QString mapId(argv[2]);
   QFileInfo filename(argv[3]);
 
-  QMap<QString, Map *> maps = readRootData(rootFile);
-  Map *map = maps[mapId];
+  RootData rootData(NULL);
+  Map *map = rootData.maps()[mapId];
 
   Projection *pjGeo = Geographic::getProjection(NAD27);
   Projection *pj = map->projection();

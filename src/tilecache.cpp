@@ -129,6 +129,7 @@ namespace Cache {
       ((fKind == IndexKind) ? ".idxz" : ".dat");
     QNetworkRequest req;
     req.setUrl(QUrl(url));
+    req.setAttribute(QNetworkRequest::CacheSaveControlAttribute, false);
     req.setAttribute(QNetworkRequest::HttpPipeliningAllowedAttribute, true);
 
     // qDebug() << "req " << url << " off " << n.offset << " len "<< offset - n.offset << " coalesce " << bundle->size();

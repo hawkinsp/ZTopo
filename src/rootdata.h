@@ -20,11 +20,34 @@
 #ifndef ROOTDATA_H
 #define ROOTDATA_H 1
 
-#include <QIODevice>
+#include <QObject>
+#include <QByteArray>
 #include <QMap>
 #include <QString>
 class Map;
+class QNetworkAccessManager;
 
-QMap<QString, Map *> readRootData(QIODevice &d);
+class RootData : public QObject {
+  Q_OBJECT;
+ public:
+  RootData(QNetworkAccessManager *manager);
+
+  int majorVersion() const { return fMajorVersion; }
+  int minorVersion() const { return fMinorVersion; }
+  QString gnisUrl() const { return fGnisUrl; }
+  QString homePageUrl() const { return fHomePageUrl; }
+  QMap<QString, Map *> maps() const { return fMaps; }
+
+ private:
+  QNetworkAccessManager *manager;
+  int fMajorVersion;
+  int fMinorVersion;
+  QString fGnisUrl;
+  QString fHomePageUrl;
+  QMap<QString, Map *> fMaps;
+
+  void parseRootData(QByteArray);
+};
+
 
 #endif

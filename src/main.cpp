@@ -21,8 +21,10 @@
 #include <QDebug>
 #include <QDir>
 #include <QDesktopServices>
+#include <QMessageBox>
 #include <QMetaType>
 #include <QNetworkAccessManager>
+#include <QNetworkDiskCache>
 #include <QSettings>
 #include <QStringBuilder>
 #include "mainwindow.h"
@@ -32,13 +34,20 @@
 #include "rootdata.h"
 #include "proj_api.h"
 #include "tilecache.h"
-
+#include "proj_api.h"
 #include <QFile>
 #include <QUrl>
 
 #ifdef Q_WS_MAC
 #include <CoreFoundation/CoreFoundation.h>
 #endif
+
+// Maximum size of the disk cache used for the root data, search results,
+// but not map tiles.
+static const qint64 maxDiskCacheSize = 10000000;
+
+int majorVersion = 0;
+int minorVersion = 2;
 
 int main(int argc, char **argv)
 {
@@ -50,8 +59,6 @@ int main(int argc, char **argv)
   QCoreApplication::setApplicationName("ZTopo");
 
   QApplication app(argc, argv);
-
-  QString rootDataName(":/config/root.json");
 
 #if defined(Q_WS_MAC)
   QApplication::instance()->setAttribute(Qt::AA_DontShowIconsInMenus);
@@ -73,40 +80,58 @@ int main(int argc, char **argv)
   CFRelease(appUrlRef);
   CFRelease(macPath);  
 #elif defined(Q_WS_WIN)
-  /* On Windows, use the proj4 subdirectory of the directory containing the application */
+  /* On Windows, use the proj4 subdirectory of the directory containing the 
+     application */
   QString projPath = app.applicationDirPath() % "/proj4";
   //qDebug() << "proj root" << projPath;
   const char *path[] = { QDir::toNativeSeparators(projPath).toLatin1().data() };
   pj_set_searchpath(1, (const char **)&path);
 #endif
 
-  // On other operating systems, we assume the proj4 library can find its own datum shift grids.
-
-  QFile rootData(rootDataName);
-  if (!rootData.exists()) {
-    qFatal("Cannot find map root data '%s'", rootDataName.toLatin1().data());
-  }
-  QMap<QString, Map *> maps = readRootData(rootData);
-
-  if (maps.size() == 0) {
-    qFatal("No maps in root data file!");
-  }
-  Map *map = maps.values()[0];
+  // On other operating systems, we assume the proj4 library can find its own datum
+  // shift grids.
 
   QSettings settings;
   QString cachePath = settings.value("cachePath", 
-                      QDesktopServices::storageLocation(QDesktopServices::CacheLocation)).toString();
+      QDesktopServices::storageLocation(QDesktopServices::CacheLocation)).toString();
   QDir::current().mkpath(cachePath);
 
   QNetworkAccessManager networkManager;
+  QNetworkDiskCache diskCache;
+  diskCache.setCacheDirectory(cachePath % "/meta");
+  diskCache.setMaximumCacheSize(maxDiskCacheSize);
+  networkManager.setCache(&diskCache);
+ 
+
+  RootData rootData(&networkManager);
+
+  if (rootData.maps().size() == 0) {
+    qFatal("No maps in root data file!");
+  }
+  Map *map = rootData.maps().values()[0];
 
   int maxMemCache = settings.value(settingMemCache, 64).toInt();
   int maxDiskCache = settings.value(settingDiskCache, 200).toInt();
   Cache::Cache tileCache(map, networkManager, maxMemCache, maxDiskCache, cachePath);
   MapRenderer renderer(map, tileCache);
-  MainWindow *window = new MainWindow(map, &renderer, tileCache, networkManager);
-  //  QPixmapCache::setCacheLimit(50000);
+  MainWindow *window = new MainWindow(rootData, map, &renderer, tileCache, 
+                                      networkManager);
 
   window->show();
+
+  if (rootData.majorVersion() > majorVersion || 
+      (rootData.majorVersion() == majorVersion 
+       && rootData.minorVersion() > minorVersion)) {
+    QMessageBox mbox;
+    mbox.setText("A new version of ZTopo is available.");
+    mbox.setInformativeText(QString("A new version of ZTopo (%1.%2) is available for download. Would you like to open the ZTopo home page?").arg(rootData.majorVersion()).arg(rootData.minorVersion()));
+    mbox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    mbox.setDefaultButton(QMessageBox::Yes);
+    int ret = mbox.exec();
+    if (ret == QMessageBox::Yes) {
+      QDesktopServices::openUrl(QUrl(rootData.homePageUrl()));
+    }
+  }
+
   return app.exec();
 }

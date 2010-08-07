@@ -19,6 +19,7 @@
 
 #include <cassert>
 #include <iostream>
+#include <QDebug>
 #include <QStringBuilder>
 #include "projection.h"
 #include "consts.h"
@@ -47,6 +48,7 @@ Projection::Projection(const char *proj, qreal s)
     std::cerr << "Could not create projection " << proj << std::endl;
     exit(-1);
   }
+  initString = proj;
 }
 
 Projection::Projection(QString proj, qreal s)
@@ -58,6 +60,7 @@ Projection::Projection(QString proj, qreal s)
               << std::endl;
     exit(-1);
   }
+  initString = proj;
 }
 
 Projection::~Projection()
@@ -67,9 +70,13 @@ Projection::~Projection()
 
 QPointF Projection::transformFrom(Projection *pjOther, QPointF p)
 {
-  double x = p.x() / pjOther->scale, y = p.y() / pjOther->scale;
-  pj_transform(pjOther->pj, pj, 1, 1, &x, &y, NULL);
-  return QPointF(x, y) * scale;
+  projUV uv;
+  double z = 0.0;
+  uv.u = p.x() / pjOther->scale;
+  uv.v = p.y() / pjOther->scale;
+  
+  pj_transform(pjOther->pj, pj, 1, 0, &uv.u, &uv.v, &z);
+  return QPointF(uv.u, uv.v) * scale;
 }
 
 QPolygonF Projection::transformFrom(Projection *pjOther, QPolygonF in)

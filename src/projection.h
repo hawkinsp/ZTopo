@@ -46,6 +46,7 @@ public:
   QPolygonF transformFrom(Projection *old, QPolygonF p);
 
 private:
+  QString initString;
   projPJ pj;
   qreal scale;
 };

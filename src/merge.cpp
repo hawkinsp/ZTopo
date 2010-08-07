@@ -43,9 +43,8 @@ int main(int argc, char **argv)
     rootTileKey = QString(argv[5]);
   }
 
-
-  QMap<QString, Map *> maps = readRootData(rootFile);
-  Map *map = maps[mapId];
+  RootData rootData(NULL);
+  Map *map = rootData.maps()[mapId];
 
 
   int layer;
