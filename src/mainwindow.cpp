@@ -158,15 +158,9 @@ void MainWindow::pageSetupTriggered(bool)
   printScene->setPageMetrics(printer);
 }
 
-PrintJob::PrintJob(PrintScene *ps, Cache::Cache &tileCache, QPrinter *p, 
-                   int layer, QPoint mapCenter, qreal mapScale, QObject *parent)
+PrintJob::PrintJob(PrintScene *ps, Cache::Cache &tileCache, QPrinter *p, QObject *parent)
   : QObject(parent), printScene(ps), printer(p), done(false)
 {
-  printScene->setPageMetrics(*printer);
-  printScene->centerMapOn(mapCenter);
-  printScene->setMapLayer(layer);
-  printScene->setMapScale(mapScale);
-
   connect(&tileCache, SIGNAL(tileLoaded()), this, SLOT(tileLoaded()));
   connect(&retryTimer, SIGNAL(timeout()), this, SLOT(tryPrint()));
 
@@ -202,12 +196,14 @@ void MainWindow::printTriggered(bool)
   if (dialog->exec() != QDialog::Accepted)
     return;
 
-  //  QPrinter *p = new QPrinter(QPrinter::HighResolution);
-  //  clonePrinter(printer, *p);
+  printScene->setPageMetrics(printer);
 
-  PrintJob *job = new PrintJob(printScene, tileCache, &printer, 
-                               view->currentLayer(), view->center(),
-                               view->currentMapScale(), this);
+  if (currentView() != PrintKind) {
+    printScene->setMapLayer(view->currentLayer());
+    printScene->setMapScale(view->currentMapScale());
+    printScene->centerMapOn(view->center());
+  }
+  PrintJob *job = new PrintJob(printScene, tileCache, &printer, this);
   printJobs << job;
 }
 
@@ -590,22 +586,24 @@ ViewKind MainWindow::currentView()
 void MainWindow::setCurrentView(ViewKind kind)
 {
 
-  switch (kind) {
-  case MapKind: //
-    centralWidgetStack->setCurrentIndex(MapKind);
-    mapViewAction->setChecked(true);
-    break;
-  case PrintKind:
-    printScene->setPageMetrics(printer);
-    printScene->setMapScale(view->currentMapScale());
-    printScene->setMapLayer(view->currentLayer());
-    printScene->centerMapOn(view->center());
-    printView->fitToView();
-    centralWidgetStack->setCurrentIndex(PrintKind);
-    printViewAction->setChecked(true);
+  if (currentView() != kind) {
+    switch (kind) {
+    case MapKind: //
+      centralWidgetStack->setCurrentIndex(MapKind);
+      mapViewAction->setChecked(true);
+      break;
+    case PrintKind:
+      printScene->setPageMetrics(printer);
+      printScene->setMapScale(view->currentMapScale());
+      printScene->setMapLayer(view->currentLayer());
+      printScene->centerMapOn(view->center());
+      printView->fitToView();
+      centralWidgetStack->setCurrentIndex(PrintKind);
+      printViewAction->setChecked(true);
     setSearchResultsVisible(false);
     break;
-  default: qFatal("Unknown view ID in viewChanged");
+    default: qFatal("Unknown view ID in viewChanged");
+    }
   }
 }
 

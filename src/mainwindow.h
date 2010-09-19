@@ -66,9 +66,7 @@ class Grid {
 class PrintJob : public QObject {
   Q_OBJECT;
  public:
-  PrintJob(PrintScene *ps, Cache::Cache &tileCache, 
-           QPrinter *printer, int layer, QPoint mapCenter, qreal mapScale, 
-           QObject *parent);
+  PrintJob(PrintScene *ps, Cache::Cache &tileCache, QPrinter *printer, QObject *parent);
 
  private slots:
   void tileLoaded();

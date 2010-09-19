@@ -224,12 +224,13 @@ void MapRenderer::renderGeographicGrid(QPainter &p, QRect area, qreal scale,
   p.setRenderHint(QPainter::Antialiasing, true);
 
   p.scale(scale, scale);
-  p.translate(-QPointF(area.topLeft()));
-  p.setTransform(map->projToMap(), true);
-
   QPen pen = p.pen();
   pen.setWidthF(pen.widthF() / scale);
   p.setPen(pen);
+
+  p.translate(-QPointF(area.topLeft()));
+  p.setTransform(map->projToMap(), true);
+
   renderGrid(p, NULL, area, pj, interval, ticks);
 
   p.restore();
@@ -255,18 +256,19 @@ void MapRenderer::renderUTMGrid(QPainter &p, QRect mRect, qreal scale,
   p.setRenderHint(QPainter::Antialiasing, true);
 
   p.scale(scale, scale);
-  p.translate(-QPointF(mRect.topLeft()));
-  p.setTransform(map->projToMap(), true);
 
   QPen pen = p.pen();
   pen.setWidthF(pen.widthF() / scale);
   p.setPen(pen);
 
+  p.translate(-QPointF(mRect.topLeft()));
+  p.setTransform(map->projToMap(), true);
+
   for (int zone = minZone; zone <= maxZone; zone++) {
     Projection *pj = UTM::getZoneProjection(d, zone);
-
+    QPainterPath *zoneBoundary = getUTMZoneBoundary(d, zone);
     p.save();
-    renderGrid(p, getUTMZoneBoundary(d, zone), mRect, pj, interval, ticks);
+    renderGrid(p, zoneBoundary, mRect, pj, interval, ticks);
     p.restore();
   }
   p.restore();
@@ -306,7 +308,11 @@ void MapRenderer::renderGrid(QPainter &p, QPainterPath *clipPath, QRect area,
   sides[Bottom] = QLineF(parea.topLeft(), parea.topRight());
 
   if (clipPath) {
-    p.setClipPath(*clipPath, Qt::IntersectClip);
+    // XXX: Qt appears to have a bug computing intersection clips on printer devices
+    // using Qt::IntersectClip. This workaround seems to work.
+    QPainterPath path = p.hasClipping() ? clipPath->intersected(p.clipPath()) 
+      : *clipPath;
+    p.setClipPath(path, Qt::ReplaceClip);
   }
 
   for (int x = gridMinX; x <= gridMaxX; x++) {
@@ -324,7 +330,7 @@ void MapRenderer::renderGrid(QPainter &p, QPainterPath *clipPath, QRect area,
       //      lines << QLine(v, vr) << QLine(v, vu);
       QLineF h(p, pr), v(p, pu);
       lines << h << v;
-
+      //      qDebug() << h << v;
       if (ticks) {
         QPointF ip;
         if (h.intersect(sides[Left], &ip) == QLineF::BoundedIntersection) {
@@ -467,6 +473,7 @@ QPainterPath *MapRenderer::getUTMZoneBoundary(Datum d, int zone)
   QRectF gridBounds = mapGeoBounds.intersected(QRectF(QPointF(minLon, -90), 
                                                       QPointF(maxLon, 90)));
   QPolygonF gridPoly(gridBounds);
+  //  qDebug() << "zone" << zone << minLon << maxLon << "boundary" << gridPoly;
 
   int size = gridPoly.size();
   assert(size = 4);
@@ -487,6 +494,7 @@ QPainterPath *MapRenderer::getUTMZoneBoundary(Datum d, int zone)
     }
   }
   path->closeSubpath();
+  //  qDebug() << "zone" << zone << minLon << maxLon << "boundary" << gridPoly;
   zoneBoundaries[d][zone-1] = path;
   return path;
 

@@ -63,7 +63,7 @@ public:
   virtual int currentLayer() const;
   virtual QRect visibleArea() const;
 
-  bool loadTiles();
+  bool loadTiles(qreal scale);
 
 protected:
   virtual void mousePressEvent(QGraphicsSceneMouseEvent *);
@@ -185,9 +185,10 @@ QPointF MapItem::itemToMap(QPointF p)
   return (p / scale) + mapPixelRect.topLeft();
 }
 
-bool MapItem::loadTiles()
+bool MapItem::loadTiles(qreal bumpedScale)
 {
-  return renderer->loadTiles(mapLayer, mapPixelRect, scale);
+  if (bumpedScale < 0.0) bumpedScale = scale;
+  return renderer->loadTiles(mapLayer, mapPixelRect, bumpedScale);
 }
 
 void MapItem::paint(QPainter *painter, const QStyleOptionGraphicsItem * option, 
@@ -196,7 +197,6 @@ void MapItem::paint(QPainter *painter, const QStyleOptionGraphicsItem * option,
   qreal detail = QStyleOptionGraphicsItem::levelOfDetailFromTransform(
                       painter->worldTransform());
   //  qDebug() << "painter" << option->exposedRect << gridEnabled << detail;
-  loadTiles();
   painter->setBackground(Qt::white);
   painter->eraseRect(itemRect);
 
@@ -230,6 +230,8 @@ void MapItem::paint(QPainter *painter, const QStyleOptionGraphicsItem * option,
   qreal bumpedScale = scale;
   painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
   painter->setRenderHint(QPainter::TextAntialiasing, true);
+
+  loadTiles(bumpedScaleDetail);
 
   painter->save();
   painter->setClipRect(mapRect);
@@ -460,5 +462,5 @@ void PrintScene::hideGrid()
 
 bool PrintScene::tilesFinishedLoading()
 {
-  return mapItem->loadTiles();
+  return mapItem->loadTiles(-1.0);
 }
