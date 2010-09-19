@@ -70,4 +70,4 @@ private:
   bool errors;
 };
 
-#endif SEARCHHANDLER_H
+#endif // SEARCHHANDLER_H

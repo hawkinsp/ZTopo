@@ -248,6 +248,8 @@ void MainWindow::createWidgets()
   searchVBox->addWidget(resultList);
   searchDock->setWidget(searchArea);
   searchDock->hide();
+  connect(searchDock, SIGNAL(visibilityChanged(bool)),
+          this, SLOT(setSearchResultsVisible(bool)));
 
   // Create the print dock widget
   /*  printDock = new QDockWidget(tr("Print"), this);

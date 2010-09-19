@@ -75,10 +75,11 @@ MapWidget::~MapWidget()
 
 void MapWidget::setDpi(int aDpi)
 {
-  if (dpi <= 0) {
+  if (aDpi <= 0) {
     dpi = logicalDpiX();
+  } else {
+    dpi = aDpi;
   }
-  dpi = aDpi;
   emit(mapScaleChanged(currentMapScale()));
 }
 
